@@ -1,0 +1,30 @@
+[project]
+name = "xhs-recon"
+version = "0.0.1"
+description = "本地小红书竞品研究管线（个人自用）"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "typer>=0.12",
+    "pyyaml>=6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+# 无 [build-system]：uv 视作非包项目，只装依赖，用 `python -m src...` 运行
+
+[tool.ruff]
+line-length = 100
+# workbench/ 为工作台流程工具，不属本项目代码实施范围
+extend-exclude = ["workbench"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

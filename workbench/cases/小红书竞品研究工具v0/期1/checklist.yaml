@@ -1,0 +1,28 @@
+# 期1 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 tools/preflight.py --config cases/小红书竞品研究工具v0/期1/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+
+必过命令:                  # 退出码须 0；expect_empty=true 时 stdout 也须空
+  - { name: lint,        run: "uv run ruff check ." }
+  - { name: format,      run: "uv run ruff format --check ." }
+  - { name: tests,       run: "uv run pytest -q" }
+  - { name: demo,        run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+
+必存产物:                  # demo 跑完后须存在（相对项目根）
+  - data/exports/accounts.csv
+  - data/exports/notes.csv
+  - data/exports/account_rank.csv
+  - data/exports/typical_notes.csv
+  - data/exports/report_input.md
+
+必含符号:                  # 本期新增接口/导出必须落地（grep 命中 ≥1）
+  - { grep: "class ResearchAdapter", in: "src/core" }
+  - { grep: "class FixtureAdapter",  in: "src/adapters" }
+  - { grep: "class Note",            in: "src/models.py" }
+  - { grep: "def run_research",      in: "src/pipelines" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",        in: "src/core" }        # 铁律：core 平台无关，不含 xhs 字样
+  - { grep: "print(",     in: "src" }             # 调试残留
+  - { grep: "proxy_pool", in: "src" }             # 越界：代理池
+  - { grep: "captcha",    in: "src" }             # 越界：验证码绕过

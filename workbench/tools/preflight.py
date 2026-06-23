@@ -61,7 +61,7 @@ def check(cfg: dict, repo: Path, rows: list) -> bool:
     for item in cfg.get("必含符号") or []:
         word = item["grep"] if isinstance(item, dict) else item
         scope = item.get("in", ".") if isinstance(item, dict) else "."
-        cmd = f"grep -rn -- '{word}' {scope}"
+        cmd = f"grep -rIn --exclude-dir=__pycache__ -- '{word}' {scope}"
         rc, out = run(cmd, repo)
         green = rc == 0 and bool(out)
         ok &= green
@@ -73,7 +73,7 @@ def check(cfg: dict, repo: Path, rows: list) -> bool:
     for item in cfg.get("禁留标记") or []:
         word = item["grep"] if isinstance(item, dict) else item
         scope = item.get("in", ".") if isinstance(item, dict) else "."
-        cmd = f"grep -rn -- '{word}' {scope}"
+        cmd = f"grep -rIn --exclude-dir=__pycache__ -- '{word}' {scope}"
         rc, out = run(cmd, repo)
         green = rc != 0 or not out  # 无命中
         ok &= green
