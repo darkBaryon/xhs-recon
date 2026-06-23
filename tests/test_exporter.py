@@ -1,0 +1,71 @@
+import csv
+from pathlib import Path
+
+from src.core.exporter import export_all
+from src.models import Account, AccountRank, Note, TypicalNote
+
+
+def _data():
+    acc = Account(
+        account_id="U1",
+        nickname="作者甲",
+        source_keywords=["留学辅导", "essay辅导"],
+        note_count=2,
+        first_seen_at="2026",
+        last_seen_at="2026",
+    )
+    note = Note(
+        note_id="N1",
+        account_id="U1",
+        title="标题",
+        body="正文",
+        tags=["留学"],
+        url="http://x/N1",
+        like_count=10000,
+        collect_count=100,
+        comment_count=10,
+        published_at="2024",
+        collected_at="2026",
+        source_keywords=["留学辅导"],
+        raw_path="p",
+    )
+    rank = AccountRank(
+        account_id="U1",
+        nickname="作者甲",
+        relevant_note_count=2,
+        keyword_hit_count=2,
+        avg_interaction=5000.0,
+        account_score=83.3,
+        note_ids=["N1", "N2"],
+    )
+    tn = TypicalNote(
+        account_id="U1",
+        note_id="N1",
+        title="标题",
+        url="http://x/N1",
+        note_score=10230.0,
+        selection_reason="top by interaction",
+    )
+    return [acc], [note], [rank], [tn]
+
+
+def test_export_all_writes_five_files(tmp_path):
+    accounts, notes, ranks, tns = _data()
+    paths = export_all(tmp_path, accounts=accounts, notes=notes, ranks=ranks, typical_notes=tns)
+    for key in ["accounts", "notes", "account_rank", "typical_notes", "report_input"]:
+        assert Path(paths[key]).exists()
+
+    with open(tmp_path / "accounts.csv", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert rows[0] == [
+        "account_id",
+        "nickname",
+        "source_keywords",
+        "note_count",
+        "first_seen_at",
+        "last_seen_at",
+    ]
+    assert rows[1][2] == "留学辅导|essay辅导"  # list 字段 | 连接
+
+    md = (tmp_path / "report_input.md").read_text(encoding="utf-8")
+    assert "作者甲" in md
