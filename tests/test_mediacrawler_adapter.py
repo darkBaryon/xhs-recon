@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
@@ -54,3 +55,25 @@ def test_search_empty_output_is_error(tmp_path, monkeypatch):
     monkeypatch.setattr(a, "_run_crawler", lambda cmd: (0, ""))
     r = a.search("k", 1, 20, "2026-06-24T00:00:00Z")
     assert not r.ok and "no notes" in r.error
+
+
+def test_search_subprocess_exception_is_error(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def boom(cmd):
+        raise subprocess.TimeoutExpired(cmd, 1)
+
+    monkeypatch.setattr(a, "_run_crawler", boom)
+    r = a.search("k", 1, 20, "2026-06-24T00:00:00Z")
+    assert not r.ok and "run failed" in r.error
+
+
+def test_launcher_default_and_configurable(tmp_path):
+    assert _adapter(tmp_path)._build_command("k", 1, 20, tmp_path)[:4] == [
+        "uv",
+        "run",
+        "python",
+        "main.py",
+    ]
+    cmd = _adapter(tmp_path, launcher=["python3"])._build_command("k", 1, 20, tmp_path)
+    assert cmd[:2] == ["python3", "main.py"]

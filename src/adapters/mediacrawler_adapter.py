@@ -30,6 +30,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         cookies: str = "",
         max_notes: int = 20,
         timeout: int = 600,
+        launcher: list[str] | None = None,
     ):
         self.mediacrawler_dir = str(mediacrawler_dir)
         self.out_dir = Path(out_dir)
@@ -37,6 +38,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self.cookies = cookies
         self.max_notes = max_notes
         self.timeout = timeout
+        # MediaCrawler 以 uv 管理（有 uv.lock/pyproject）；用其环境跑以带上 Playwright。
+        # 可配以免硬依赖 uv（如换成其 .venv 的 python）。
+        self.launcher = launcher or ["uv", "run", "python"]
 
     def _save_path(self, collected_at: str) -> Path:
         # 每次 run 用唯一子目录隔离 MediaCrawler 的同日追加写
@@ -44,9 +48,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
 
     def _build_command(self, keyword: str, page: int, limit: int, save_path: Path) -> list[str]:
         cmd = [
-            "uv",
-            "run",
-            "python",
+            *self.launcher,
             "main.py",
             "--platform",
             "xhs",
