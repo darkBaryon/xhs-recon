@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# 系统
+.DS_Store
+
+# 工作台生成的站点（HTML 产物，源在 *.md）
+workbench/site/
+
+# 管线运行时产物（采集 raw / 中间结果 / 导出，不入库）
+data/raw/
+data/processed/
+data/exports/
