@@ -1,0 +1,17 @@
+provider: fixture
+fixture_path: tests/fixtures/search_contents_sample.jsonl
+keywords: ["留学辅导"]
+synonyms:
+  留学辅导: ["essay辅导", "final自救"]
+search:
+  pages: 1
+  limit: 20
+ranking:
+  weights:
+    note_count: 10
+    keyword_hit: 5
+    interaction: 0.01
+selection:
+  top_notes_per_account: 2
+export:
+  out_dir: data/exports
