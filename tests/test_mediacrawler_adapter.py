@@ -68,6 +68,11 @@ def test_search_subprocess_exception_is_error(tmp_path, monkeypatch):
     assert not r.ok and "run failed" in r.error
 
 
+def test_save_path_is_absolute_for_cross_cwd():
+    a = MediaCrawlerAdapter("/some/mediacrawler", "data/raw")
+    assert a._save_path("2026-06-24T00:00:00Z").is_absolute()  # 跨 cwd 须绝对
+
+
 def test_launcher_default_and_configurable(tmp_path):
     assert _adapter(tmp_path)._build_command("k", 1, 20, tmp_path)[:4] == [
         "uv",

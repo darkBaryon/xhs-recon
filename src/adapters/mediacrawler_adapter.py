@@ -33,7 +33,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         launcher: list[str] | None = None,
     ):
         self.mediacrawler_dir = str(mediacrawler_dir)
-        self.out_dir = Path(out_dir)
+        # 绝对路径：MediaCrawler 以自身目录为 cwd 运行，save_data_path 须绝对才能跨 cwd 读回
+        self.out_dir = Path(out_dir).resolve()
         self.login_type = login_type
         self.cookies = cookies
         self.max_notes = max_notes
