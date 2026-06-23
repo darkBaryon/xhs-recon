@@ -1,0 +1,21 @@
+# 期2 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 tools/preflight.py --config cases/小红书竞品研究工具v0/期2/checklist.yaml --repo <项目根>
+
+必过命令:                  # 退出码须 0；真实采集不可自动化，不入此表（见方案 §6 集成验收）
+  - { name: lint,         run: "uv run ruff check ." }
+  - { name: format,       run: "uv run ruff format --check ." }
+  - { name: tests,        run: "uv run pytest -q" }
+  - { name: demo-fixture, run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+
+必存产物:
+  - configs/sample_mediacrawler.yaml
+  - scripts/integration_mediacrawler.py
+
+必含符号:
+  - { grep: "class MediaCrawlerAdapter", in: "src/adapters" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",                  in: "src/core" }    # 铁律：core 平台无关
+  - { grep: "print(",               in: "src" }         # 调试残留
+  - { grep: "ENABLE_IP_PROXY = True",  in: "src" }       # 红线：禁代理池
+  - { grep: "ENABLE_CDP_MODE = True",  in: "src" }       # 红线：禁 CDP 反风控
