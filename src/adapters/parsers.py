@@ -19,8 +19,6 @@ def normalize_count(raw) -> int:
     try:
         if s.endswith("万"):
             return int(float(s[:-1]) * 10000)
-        if s.endswith("千"):
-            return int(float(s[:-1]) * 1000)
         return int(float(s))
     except ValueError:
         return 0
