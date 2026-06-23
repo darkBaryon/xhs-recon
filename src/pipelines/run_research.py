@@ -10,6 +10,7 @@ import typer
 import yaml
 
 from src.adapters.fixture_adapter import FixtureAdapter
+from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
 from src.core.account_ranker import rank_accounts
 from src.core.aggregator import aggregate
 from src.core.exporter import export_all
@@ -26,10 +27,20 @@ def _now_iso() -> str:
 
 def _build_adapter(config: dict) -> ResearchAdapter:
     provider = config.get("provider", "fixture")
-    if provider == "fixture":
+    if provider == "mediacrawler":
+        mc_dir = config["mediacrawler_dir"]
+        if Path(mc_dir).exists():
+            mc = config.get("mediacrawler", {})
+            return MediaCrawlerAdapter(
+                mc_dir,
+                out_dir=mc.get("out_dir", "data/raw"),
+                login_type=mc.get("login_type", "qrcode"),
+                cookies=mc.get("cookies", ""),
+                max_notes=config.get("search", {}).get("limit", 20),
+            )
+        # 路径 (a)：MediaCrawler 目录不可用 → 启动降级 fixture
         return FixtureAdapter(config["fixture_path"])
-    # 期2 在此接 xhs_cli_adapter + 无命令降级
-    raise ValueError(f"unknown provider: {provider}")
+    return FixtureAdapter(config["fixture_path"])
 
 
 def run_research(config_path: str) -> dict[str, str]:
