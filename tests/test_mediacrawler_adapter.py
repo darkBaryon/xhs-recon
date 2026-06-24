@@ -14,6 +14,8 @@ def test_build_command_has_compliance_flags(tmp_path):
     cmd = _adapter(tmp_path)._build_command("留学辅导", 1, 20, tmp_path / "run")
     assert cmd[cmd.index("--enable_ip_proxy") + 1] == "no"  # 关代理池
     assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"  # 单并发
+    assert cmd[cmd.index("--get_comment") + 1] == "no"  # 禁评论（期2 不碰评论、不存敏感字段）
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
     assert cmd[cmd.index("--keywords") + 1] == "留学辅导"
     assert cmd[cmd.index("--type") + 1] == "search"
     assert "ENABLE_CDP" not in " ".join(cmd)  # CDP 用默认，不在命令里
