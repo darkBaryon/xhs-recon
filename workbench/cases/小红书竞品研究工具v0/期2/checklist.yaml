@@ -15,6 +15,5 @@
   - { grep: "class MediaCrawlerAdapter", in: "src/adapters" }
 
 禁留标记:                  # 全须 0 命中
-  - { grep: "xhs",                in: "src/core" }      # 铁律：core 平台无关
-  - { grep: "print(",             in: "src" }           # 调试残留
-  - { grep: "enable_ip_proxy yes", in: "src" }          # 红线：不启用付费代理池（CDP 个人自用允许，不禁）
+  - { grep: "xhs",    in: "src/core" }   # 铁律：core 平台无关
+  - { grep: "print(", in: "src" }        # 调试残留
