@@ -13,6 +13,7 @@ import yaml
 
 from src.adapters.fixture_adapter import FixtureAdapter
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
+from src.adapters.parsers import normalize_creator_ref
 from src.core.account_ranker import rank_accounts
 from src.core.aggregator import aggregate
 from src.core.exporter import export_all
@@ -20,7 +21,8 @@ from src.core.keyword_expander import expand_keywords
 from src.core.note_selector import select_typical_notes
 from src.core.ports import ResearchAdapter
 from src.core.time_window import filter_notes
-from src.models import FetchResult
+from src.core.watchlist import build_watchlist
+from src.models import Account, FetchResult, WatchAccount
 from src.pipelines.logging_setup import _compact_run_id, configure_logging, log_result
 
 app = typer.Typer(add_completion=False)
@@ -34,6 +36,7 @@ def _now_iso() -> str:
 def _build_adapter(config: dict) -> ResearchAdapter:
     provider = config.get("provider", "fixture")
     comments_path = config.get("comments", {}).get("fixture_path")
+    creator_path = config.get("creator_fixture_path")
     search_cfg = config.get("search", {})
     if provider == "mediacrawler":
         mc_dir = config["mediacrawler_dir"]
@@ -47,9 +50,13 @@ def _build_adapter(config: dict) -> ResearchAdapter:
                 sort_type=search_cfg.get("sort", ""),
                 max_notes=search_cfg.get("limit", 20),
             )
+        # creator_fixture_path is fixture-provider only; MediaCrawler mode must use
+        # MediaCrawler creator output. The unavailable-dir fallback keeps that boundary explicit.
         # 路径 (a)：MediaCrawler 目录不可用 → 启动降级 fixture
         return FixtureAdapter(config["fixture_path"], comments_path=comments_path)
-    return FixtureAdapter(config["fixture_path"], comments_path=comments_path)
+    return FixtureAdapter(
+        config["fixture_path"], comments_path=comments_path, creator_path=creator_path
+    )
 
 
 def _apply_time_window(
@@ -78,6 +85,18 @@ def _apply_time_window(
         f"time_window: kept={kept} out_of_window={out_of_window} missing_time={missing_time}"
     )
     return filtered_results
+
+
+def _backfill_watchlist_nicknames(
+    watchlist: list[WatchAccount], accounts: list[Account]
+) -> list[WatchAccount]:
+    nickname_by_id = {a.account_id: a.nickname for a in accounts if a.nickname}
+    return [
+        wa.model_copy(update={"nickname": nickname_by_id[wa.account_id]})
+        if not wa.nickname and wa.account_id in nickname_by_id
+        else wa
+        for wa in watchlist
+    ]
 
 
 def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
@@ -119,6 +138,48 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     logger.info("聚合去重：笔记 %d · 账号 %d", len(notes), len(accounts))
     ranks = rank_accounts(accounts, notes, config.get("ranking", {}).get("weights"))
     logger.info("账号打分：%d 个", len(ranks))
+
+    watchlist = None
+    creator_notes = None
+    watchlist_cfg = config.get("watchlist")
+    if watchlist_cfg is not None:
+        try:
+            manual_ids = [normalize_creator_ref(ref) for ref in watchlist_cfg.get("manual", [])]
+        except ValueError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(1) from e
+
+        auto_top_n = watchlist_cfg.get("auto_top_n", 0)
+        max_total = watchlist_cfg.get("max_total", 10)
+        watchlist = build_watchlist(ranks, manual_ids, auto_top_n, max_total)
+        auto_count = sum(1 for account in watchlist if account.source == "auto")
+        logger.info(
+            "watchlist：manual %d · auto %d/%d · total %d",
+            len(manual_ids),
+            auto_count,
+            auto_top_n,
+            len(watchlist),
+        )
+
+        creator_notes = []
+        if watchlist:
+            creator_cfg = config.get("creator", {})
+            try:
+                creator_result = adapter.fetch_creator_notes(
+                    [account.account_id for account in watchlist],
+                    creator_cfg.get("notes_per_account", 10),
+                    collected_at,
+                )
+            except NotImplementedError:
+                logger.warning("创作者笔记采集：跳过（数据源不支持）")
+            else:
+                log_result(logger, creator_result)
+                creator_notes = creator_result.notes
+                watchlist = _backfill_watchlist_nicknames(watchlist, creator_result.accounts)
+                logger.info("创作者笔记：采到 %d 条", len(creator_notes))
+        else:
+            logger.info("watchlist：为空，跳过创作者笔记采集")
+
     selection_cfg = config.get("selection", {})
     top = selection_cfg.get("top_notes_per_account", 2)
     typical = select_typical_notes(
@@ -162,6 +223,8 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
         typical_notes=typical,
         comments=comments,
         comment_top_k=comments_cfg.get("report_top_k", 3),
+        watchlist=watchlist,
+        creator_notes=creator_notes,
     )
     _update_latest_link(out_base, run_dir)
     logger.info("✓ 导出 %d 个文件 → %s", len(paths), run_dir)

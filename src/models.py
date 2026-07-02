@@ -54,6 +54,12 @@ class TypicalNote(BaseModel):
     selection_reason: str
 
 
+class WatchAccount(BaseModel):
+    account_id: str
+    nickname: str = ""
+    source: str
+
+
 class FetchResult(BaseModel):
     """采集+解析的边界产物。失败不抛，装进 error；core 只读 notes/accounts。"""
 

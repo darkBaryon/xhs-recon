@@ -7,6 +7,7 @@ from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
 from src.models import TypicalNote
 
 SAMPLE = "tests/fixtures/search_contents_sample.jsonl"
+CREATOR = "tests/fixtures/creator_contents_sample.jsonl"
 
 
 def _adapter(tmp_path, **kw):
@@ -213,4 +214,95 @@ def test_fetch_comments_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, m
     assert r.comments == []
     assert "exit 1" in r.error
     assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "boom"
+    assert "MediaCrawler 退出码 1" in caplog.text
+
+
+def test_build_creator_command_has_creator_flags(tmp_path):
+    cmd = _adapter(tmp_path)._build_creator_command(
+        "601d0481000000000101cc46",
+        7,
+        tmp_path / "creator" / "601d0481000000000101cc46",
+    )
+
+    assert cmd[cmd.index("--type") + 1] == "creator"
+    assert cmd[cmd.index("--creator_id") + 1] == "601d0481000000000101cc46"
+    assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "7"
+    assert cmd[cmd.index("--enable_ip_proxy") + 1] == "no"
+    assert cmd[cmd.index("--get_comment") + 1] == "no"
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
+    assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"
+
+
+def test_fetch_creator_notes_runs_each_account_in_own_dir_and_reads_jsonl(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    fixture_lines = Path(CREATOR).read_text(encoding="utf-8").splitlines()
+    commands = []
+
+    def fake_run(cmd):
+        commands.append(cmd)
+        account_id = cmd[cmd.index("--creator_id") + 1]
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        lines = [line for line in fixture_lines if f'"user_id": "{account_id}"' in line]
+        (d / "creator_contents_2026-07-02.jsonl").write_text("\n".join(lines), encoding="utf-8")
+        return 0, f"creator stdout {account_id}"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(
+        ["601d0481000000000101cc46", "602d0481000000000101cc47"],
+        2,
+        "2026-07-02T00:00:00Z",
+    )
+
+    assert r.ok
+    assert r.operation == "creator_notes"
+    assert len(r.notes) == 4
+    assert {n.account_id for n in r.notes} == {
+        "601d0481000000000101cc46",
+        "602d0481000000000101cc47",
+    }
+    assert all(n.source_keywords == [] for n in r.notes)
+    assert all(n.like_count == 0 for n in r.notes)
+    assert len(commands) == 2
+    for cmd in commands:
+        account_id = cmd[cmd.index("--creator_id") + 1]
+        assert Path(cmd[cmd.index("--save_data_path") + 1]).parts[-2:] == (
+            "creator",
+            account_id,
+        )
+        assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "2"
+
+
+def test_fetch_creator_notes_partial_failure_keeps_success_notes(tmp_path, monkeypatch, caplog):
+    a = _adapter(tmp_path)
+    fixture_lines = Path(CREATOR).read_text(encoding="utf-8").splitlines()
+    failed_id = "602d0481000000000101cc47"
+
+    def fake_run(cmd):
+        account_id = cmd[cmd.index("--creator_id") + 1]
+        if account_id == failed_id:
+            return 1, "creator boom"
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        lines = [line for line in fixture_lines if f'"user_id": "{account_id}"' in line]
+        (d / "creator_contents_2026-07-02.jsonl").write_text("\n".join(lines), encoding="utf-8")
+        return 0, "creator ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+
+    with caplog.at_level(logging.WARNING):
+        r = a.fetch_creator_notes(
+            ["601d0481000000000101cc46", failed_id],
+            2,
+            "2026-07-02T00:00:00Z",
+        )
+
+    assert not r.ok
+    assert len(r.notes) == 2
+    assert {n.account_id for n in r.notes} == {"601d0481000000000101cc46"}
+    assert r.error == f"creator fetch failed: {failed_id}"
+    assert r.raw_path.endswith("creator")
+    assert " && " in r.command
     assert "MediaCrawler 退出码 1" in caplog.text

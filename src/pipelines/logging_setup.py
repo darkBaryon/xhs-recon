@@ -21,7 +21,7 @@ FILE_FORMAT = (
 )
 
 # 评论采集等操作名 → 人话（log_result 失败行用）
-_OP_CN = {"search": "搜索", "fetch_comments": "评论采集"}
+_OP_CN = {"search": "搜索", "fetch_comments": "评论采集", "creator_notes": "创作者笔记采集"}
 
 
 class ConsoleFormatter(logging.Formatter):
@@ -119,6 +119,8 @@ def configure_logging(cfg: dict | None, *, verbose: bool, run_id: str, provider:
 def log_result(logger: logging.Logger, fr: FetchResult) -> None:
     # 成功走 DEBUG：阶段行（INFO）已含同等信息，避免控制台每步两行重复。
     # stacklevel=2：日志出处指向调用现场（run_research 的那一行），而非本帮手函数
+    if fr.command:
+        logger.debug("%s command: %s", fr.operation, fr.command, stacklevel=2)
     if fr.ok:
         logger.debug(
             "%s ok: %d notes %d accounts %d comments",

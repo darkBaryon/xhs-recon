@@ -1,5 +1,6 @@
 provider: fixture
 fixture_path: tests/fixtures/search_contents_sample.jsonl
+creator_fixture_path: tests/fixtures/creator_contents_sample.jsonl
 keywords: ["留学辅导"]
 synonyms:
   留学辅导: ["essay辅导", "final自救"]
@@ -13,6 +14,13 @@ ranking:
     note_count: 10
     keyword_hit: 5
     interaction: 0.01
+watchlist:
+  auto_top_n: 2
+  manual:
+    - https://www.xiaohongshu.com/user/profile/601d0481000000000101cc46?xsec_token=demo
+  max_total: 5
+creator:
+  notes_per_account: 3
 selection:
   top_notes_per_account: 2
   half_life_days: 0
