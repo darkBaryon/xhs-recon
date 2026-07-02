@@ -5,6 +5,7 @@ mediacrawler:
   login_type: qrcode                       # 或 cookie（配 cookies）
   cookies: ""
   out_dir: data/raw                        # 真实采集 raw 落此（gitignore）
+  timeout: 600                             # 单次子进程上限秒数（搜索每词/creator 每账号各一次）
 keywords_file: configs/keywords-留学辅导.yaml     # 词表资产外置（与 inline keywords/synonyms 互斥）
 search:
   pages: 1
@@ -31,6 +32,7 @@ comments:
   enabled: true
   limit: 10
   report_top_k: 3
+  max_notes: 30                # 采评论的典型笔记上限（按分数截前 N，防批量超时）
   fixture_path: tests/fixtures/comments.jsonl   # MediaCrawler 不可用降级 fixture 时使用
 logging:
   level: info

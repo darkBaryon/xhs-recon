@@ -268,7 +268,7 @@ def export_all(
     notes: list[Note],
     ranks: list[AccountRank],
     typical_notes: list[TypicalNote],
-    comments: list[Comment] = [],
+    comments: list[Comment] | None = None,
     comment_top_k: int = 3,
     watchlist: list[WatchAccount] | None = None,
     creator_notes: list[Note] | None = None,
@@ -277,6 +277,7 @@ def export_all(
     topic_feed_stats: WindowFilterStats | None = None,
     topic_feed_window_days: int = 0,
 ) -> dict[str, str]:
+    comments = comments or []
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     paths: dict[str, str] = {}

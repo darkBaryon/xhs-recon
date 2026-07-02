@@ -50,6 +50,7 @@ def _build_adapter(config: dict) -> ResearchAdapter:
                 cookies=mc.get("cookies", ""),
                 sort_type=search_cfg.get("sort", ""),
                 max_notes=search_cfg.get("limit", 20),
+                timeout=mc.get("timeout", 600),
             )
         # creator_fixture_path is fixture-provider only; MediaCrawler mode must use
         # MediaCrawler creator output. The unavailable-dir fallback keeps that boundary explicit.
@@ -261,11 +262,21 @@ def _comments_stage(
     comments_cfg = config.get("comments", {})
     comments: list[Comment] = []
     if comments_cfg.get("enabled"):
+        # 批量上限：典型笔记随账号数线性膨胀（实测 119 条单命令必超时），按分数截前 N
+        max_notes = comments_cfg.get("max_notes", 30)
+        targets = typical
+        if max_notes and len(typical) > max_notes:
+            targets = sorted(typical, key=lambda t: t.note_score, reverse=True)[:max_notes]
+            logger.info(
+                "评论：典型笔记 %d 条超上限，按分数取前 %d 条（comments.max_notes）",
+                len(typical),
+                max_notes,
+            )
         # 进行时提示：评论段是单个子进程调用，期间无逐条输出，预告避免误判卡死
-        logger.info("评论：开始采集 %d 条典型笔记的评论（单并发批量，约需数分钟）", len(typical))
+        logger.info("评论：开始采集 %d 条典型笔记的评论（单并发批量，约需数分钟）", len(targets))
         try:
             comment_result = adapter.fetch_comments(
-                typical, comments_cfg.get("limit", 10), collected_at
+                targets, comments_cfg.get("limit", 10), collected_at
             )
         except NotImplementedError:
             comment_result = None

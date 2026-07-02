@@ -201,3 +201,46 @@ def test_full_chain_search_sync_comments(tmp_path):
         "topic_feed.jsonl",
         "comments.csv",
     } <= names
+
+
+class _CaptureCommentsAdapter:
+    """B3 用：记录 fetch_comments 实际收到的典型笔记数。"""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.seen: list[int] = []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def fetch_comments(self, notes, limit, collected_at):
+        self.seen.append(len(notes))
+        return self._inner.fetch_comments(notes, limit, collected_at)
+
+
+def test_comments_stage_caps_typical_notes(monkeypatch):
+    """B3：典型笔记超 comments.max_notes 时按分数截前 N 采评论（实测 119 条必超时的修复）。"""
+    from src.adapters.fixture_adapter import FixtureAdapter
+    from src.models import TypicalNote
+    from src.pipelines.run_research import _comments_stage
+
+    adapter = _CaptureCommentsAdapter(
+        FixtureAdapter(
+            "tests/fixtures/search_contents_sample.jsonl",
+            comments_path="tests/fixtures/comments.jsonl",
+        )
+    )
+    typical = [
+        TypicalNote(
+            account_id="a",
+            note_id=f"n{i}",
+            title="t",
+            url=f"https://example.com/n{i}",
+            note_score=float(i),
+            selection_reason="top",
+        )
+        for i in range(10)
+    ]
+    cfg = {"comments": {"enabled": True, "limit": 5, "max_notes": 3}}
+    _comments_stage(cfg, adapter, typical, "2026")
+    assert adapter.seen == [3]  # 只送前 3 条（按 note_score 降序）

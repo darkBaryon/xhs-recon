@@ -23,7 +23,7 @@ line-length = 100
 extend-exclude = ["workbench"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "B006"]  # B006：可变默认参数（隐患 B5 的机械兜底）
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
