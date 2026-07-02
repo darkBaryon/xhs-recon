@@ -43,6 +43,9 @@ class AccountRank(BaseModel):
     avg_interaction: float
     account_score: float
     note_ids: list[str]
+    vertical_ratio: float = 0.0
+    recent_note_count: int = 0
+    profile_score: float = 0.0
 
 
 class TypicalNote(BaseModel):
