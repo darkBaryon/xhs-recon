@@ -11,12 +11,18 @@
 uv run python -m src.pipelines.run_research --config configs/sample.yaml
 
 # 期3：真实采集（需 ../MediaCrawler 就绪 + 已登录；manual 集成验收）
-uv run python scripts/integration_mediacrawler.py --config configs/sample_mediacrawler.yaml
+uv run python scripts/integration_mediacrawler.py --config configs/sample_mediacrawler.yaml -v
 ```
 
 导出落 `data/exports/`：`accounts/notes/account_rank/typical_notes.csv` + `report_input.md`。当 `comments.enabled: true` 且采到评论时，额外产出 `comments.csv`，表头固定为 `body,note_id,like_count,collected_at`，并把每条典型笔记的前几条高赞评论织入 `report_input.md`。
 
 真实评论采集会在搜索后再起一次 MediaCrawler `detail` 子进程。建议用 CDP / 本机已登录浏览器复用会话；纯 `qrcode` 登录可能在评论阶段再次要求扫码。只抓典型笔记一级评论，不抓全量笔记或二级评论。
+
+## 日志
+
+控制台默认显示 INFO 阶段行；加 `--verbose` / `-v` 后控制台显示 DEBUG。每次运行会写 `data/logs/run-<run_id>.log`，文件日志固定 DEBUG，目录可在配置的 `logging.dir` 调整，也可用 `logging.file_enabled: false` 关闭。
+
+真实 MediaCrawler 子进程输出会完整落到本次 raw 目录的 `mediacrawler.log`。复盘真实采集时先看 `data/logs/run-*.log` 定位阶段和 raw_path，再打开对应 `mediacrawler.log` 看 MediaCrawler 原始 stdout/stderr。
 
 ## 工程化
 
