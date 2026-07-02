@@ -4,6 +4,7 @@ from src.adapters.fixture_adapter import FixtureAdapter
 
 SAMPLE = "tests/fixtures/search_contents_sample.jsonl"
 COMMENTS = "tests/fixtures/comments.jsonl"
+CREATOR = "tests/fixtures/creator_contents_sample.jsonl"
 
 
 def test_search_returns_parsed_notes():
@@ -49,3 +50,39 @@ def test_fetch_comments_limit_caps_comments():
     r = FixtureAdapter(SAMPLE, comments_path=COMMENTS).fetch_comments([], 1, "2026")
 
     assert len(r.comments) == 1
+
+
+def test_fetch_creator_notes_without_fixture_is_not_implemented():
+    with pytest.raises(NotImplementedError):
+        FixtureAdapter(SAMPLE).fetch_creator_notes(["601d0481000000000101cc46"], 10, "2026")
+
+
+def test_fetch_creator_notes_filters_accounts_and_caps_each_account():
+    r = FixtureAdapter(SAMPLE, creator_path=CREATOR).fetch_creator_notes(
+        ["601d0481000000000101cc46", "602d0481000000000101cc47"],
+        1,
+        "2026",
+    )
+
+    assert r.ok
+    assert r.operation == "creator_notes"
+    assert [n.note_id for n in r.notes] == [
+        "6a4661cd0000000017029d86",
+        "6a4661990000000017020001",
+    ]
+    assert [n.account_id for n in r.notes] == [
+        "601d0481000000000101cc46",
+        "602d0481000000000101cc47",
+    ]
+    assert r.notes[0].like_count == 0
+    assert r.notes[0].source_keywords == []
+
+
+def test_fetch_creator_notes_keeps_file_order_after_filtering():
+    r = FixtureAdapter(SAMPLE, creator_path=CREATOR).fetch_creator_notes(
+        ["602d0481000000000101cc47"],
+        10,
+        "2026",
+    )
+
+    assert [n.title for n in r.notes] == ["第二账号第一条主页笔记", "第二账号第二条主页笔记"]

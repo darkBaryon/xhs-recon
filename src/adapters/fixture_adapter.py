@@ -13,9 +13,15 @@ logger = logging.getLogger(__name__)
 class FixtureAdapter(ResearchAdapter):
     provider_name = "fixture"
 
-    def __init__(self, fixture_path: str, comments_path: str | None = None):
+    def __init__(
+        self,
+        fixture_path: str,
+        comments_path: str | None = None,
+        creator_path: str | None = None,
+    ):
         self._path = Path(fixture_path)
         self._comments_path = Path(comments_path) if comments_path else None
+        self._creator_path = Path(creator_path) if creator_path else None
 
     def search(self, keyword: str, page: int, limit: int, collected_at: str) -> FetchResult:
         logger.debug("fixture search path=%s page=%s limit=%s", self._path, page, limit)
@@ -78,5 +84,50 @@ class FixtureAdapter(ResearchAdapter):
             collected_at=collected_at,
             comments=comments,
             raw_path=str(self._comments_path),
+            raw_text=text,
+        )
+
+    def fetch_creator_notes(
+        self, account_ids: list[str], limit: int, collected_at: str
+    ) -> FetchResult:
+        if self._creator_path is None:
+            raise NotImplementedError
+        logger.debug("fixture creator path=%s limit=%s", self._creator_path, limit)
+        try:
+            text = self._creator_path.read_text(encoding="utf-8")
+        except OSError as e:
+            return FetchResult(
+                provider=self.provider_name,
+                operation="creator_notes",
+                collected_at=collected_at,
+                error=f"read creator fixture failed: {e}",
+            )
+
+        all_notes, all_accounts = parse_jsonl_lines(
+            text.splitlines(),
+            keyword="",
+            collected_at=collected_at,
+            raw_path=str(self._creator_path),
+        )
+        wanted = set(account_ids)
+        counts: dict[str, int] = {}
+        notes = []
+        accounts = []
+        for note, account in zip(all_notes, all_accounts, strict=True):
+            if note.account_id not in wanted:
+                continue
+            if limit and counts.get(note.account_id, 0) >= limit:
+                continue
+            counts[note.account_id] = counts.get(note.account_id, 0) + 1
+            notes.append(note)
+            accounts.append(account)
+
+        return FetchResult(
+            provider=self.provider_name,
+            operation="creator_notes",
+            collected_at=collected_at,
+            notes=notes,
+            accounts=accounts,
+            raw_path=str(self._creator_path),
             raw_text=text,
         )
