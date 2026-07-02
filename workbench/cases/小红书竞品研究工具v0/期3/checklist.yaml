@@ -1,0 +1,29 @@
+# 期3 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 tools/preflight.py --config cases/小红书竞品研究工具v0/期3/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+
+必过命令:                  # 退出码须 0；真实评论采集不可自动化，不入此表（见方案 §6 集成验收）
+  - { name: lint,         run: "uv run ruff check ." }
+  - { name: format,       run: "uv run ruff format --check ." }
+  - { name: tests,        run: "uv run pytest -q" }
+  - { name: demo-fixture, run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+
+必存产物:                  # demo（fixture 开评论）跑完后须存在
+  - data/exports/comments.csv
+  - tests/fixtures/comments.jsonl
+  - configs/sample.yaml
+
+必含符号:                  # 本期新增接口/导出必须落地（grep 命中 ≥1）
+  - { grep: "class Comment",                 in: "src/models.py" }
+  - { grep: "def parse_comments_jsonl_lines", in: "src/adapters" }
+  - { grep: "def fetch_comments",            in: "src/adapters" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",             in: "src/core" }              # 铁律：core 平台无关
+  - { grep: "print(",          in: "src" }                  # 调试残留
+  - { grep: "enable_ip_proxy yes", in: "src" }              # 越界：付费代理池
+  # 红线：评论路径不得引用身份/IP/头像键（这些键仅评论侧禁用；
+  # 账号/笔记侧合法用 nickname/user_id，故不能全文件 grep parsers.py/exporter.py，
+  # 由 pytest 专项测试兜底——见下 “必过命令: tests” + 方案 §6 红线用例）
+  - { grep: "ip_location",     in: "src/adapters" }          # 评论专属身份/位置键，全 adapter 层禁
+  - { grep: "\"avatar\"",      in: "src/adapters" }          # 评论头像键，禁映射（--get_sub_comment 开关合法，故不 grep sub_comment）
