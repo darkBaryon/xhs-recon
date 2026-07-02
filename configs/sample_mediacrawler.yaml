@@ -21,7 +21,9 @@ ranking:
 watchlist:
   auto_top_n: 2
   manual:
-    - 601d0481000000000101cc46
+    - 638ea9d7000000001f01d7f7   # 路觅留学生课程辅导
+    - 63a95006000000002801986e   # 辅无忧留学课业辅导规划站
+    - 670cac2a000000001d030d44   # Alevel经济张老师-上海超级学长
   max_total: 5
 creator:
   notes_per_account: 10
