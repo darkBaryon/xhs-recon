@@ -19,3 +19,8 @@ class ResearchAdapter(ABC):
     ) -> FetchResult:
         # 期3 才必需；期1/期2 adapter 不必覆盖
         raise NotImplementedError
+
+    def fetch_creator_notes(
+        self, account_ids: list[str], limit: int, collected_at: str
+    ) -> FetchResult:
+        raise NotImplementedError

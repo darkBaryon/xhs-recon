@@ -24,3 +24,8 @@ def test_concrete_search_returns_ok_result():
 def test_fetch_comments_defaults_to_not_implemented():
     with pytest.raises(NotImplementedError):
         _Dummy().fetch_comments("n1", 10, "2026")
+
+
+def test_fetch_creator_notes_defaults_to_not_implemented():
+    with pytest.raises(NotImplementedError):
+        _Dummy().fetch_creator_notes(["u1"], 10, "2026")
