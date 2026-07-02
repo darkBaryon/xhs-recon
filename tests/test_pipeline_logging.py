@@ -70,7 +70,7 @@ def test_logs_do_not_include_comment_body_or_identity_fields(tmp_path, monkeypat
     with caplog.at_level(logging.DEBUG):
         run_research(str(cfg_path), verbose=True)
 
-    run_log = (log_dir / "run-2026-log-redline.log").read_text(encoding="utf-8")
+    run_log = (log_dir / "run-2026logredline.log").read_text(encoding="utf-8")
     combined_logs = caplog.text + "\n" + run_log
     for forbidden in [
         "这个角度很有帮助",

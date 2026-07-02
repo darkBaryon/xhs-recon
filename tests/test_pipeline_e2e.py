@@ -14,6 +14,7 @@ def _cfg(out_dir: Path) -> dict:
         "search": {"pages": 1, "limit": 20},
         "ranking": {"weights": {"note_count": 10, "keyword_hit": 5, "interaction": 0.01}},
         "selection": {"top_notes_per_account": 2},
+        "logging": {"file_enabled": False},  # 测试不往真实 data/logs/ 攒文件（代码评审建议1）
         "export": {"out_dir": str(out_dir)},
     }
 

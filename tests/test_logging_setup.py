@@ -21,7 +21,7 @@ def test_configure_logging_creates_console_and_file_handlers(tmp_path):
     assert {h.name for h in handlers} == {"xhsrecon.console", "xhsrecon.file"}
     assert next(h for h in handlers if h.name == "xhsrecon.console").level == logging.WARNING
     assert next(h for h in handlers if h.name == "xhsrecon.file").level == logging.DEBUG
-    assert (tmp_path / "run-run-1.log").exists()
+    assert (tmp_path / "run-run1.log").exists()  # 文件名做安全压缩：非 [0-9A-Za-zT] 字符剔除
 
 
 def test_configure_logging_verbose_forces_console_debug(tmp_path):
@@ -45,7 +45,7 @@ def test_configure_logging_file_can_be_disabled(tmp_path):
     )
 
     assert {h.name for h in _own_handlers()} == {"xhsrecon.console"}
-    assert not (tmp_path / "run-run-no-file.log").exists()
+    assert not list(tmp_path.glob("run-*.log"))
 
 
 def test_configure_logging_idempotent_keeps_stranger_handler(tmp_path):
@@ -85,8 +85,8 @@ def test_run_context_fields_written_to_file(tmp_path):
     for handler in _own_handlers():
         handler.flush()
 
-    text = (tmp_path / "run-run-fields.log").read_text(encoding="utf-8")
-    assert "[fixture run-fields] hello" in text
+    text = (tmp_path / "run-runfields.log").read_text(encoding="utf-8")
+    assert "[fixture run-fields] hello" in text  # 文件行保留原始 run_id 上下文字段
 
 
 def test_log_result_routes_ok_and_error(caplog):
@@ -96,10 +96,12 @@ def test_log_result_routes_ok_and_error(caplog):
         provider="fixture", operation="fetch_comments", collected_at="2026", error="boom"
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         log_result(logger, ok)
         log_result(logger, bad)
 
-    assert "search ok: 0 notes 0 accounts 0 comments" in caplog.text
+    # 成功降 DEBUG（阶段 INFO 行已含同等信息，避免控制台重复）；失败仍 WARN
+    ok_records = [r for r in caplog.records if "search ok:" in r.message]
+    assert ok_records and all(r.levelno == logging.DEBUG for r in ok_records)
     assert "fetch_comments failed: boom" in caplog.text
     assert any(r.levelno == logging.WARNING for r in caplog.records)
