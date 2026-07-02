@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 
 from src.core.exporter import export_all
-from src.models import Account, AccountRank, Note, TypicalNote
+from src.models import Account, AccountRank, Comment, Note, TypicalNote
 
 
 def _data():
@@ -54,6 +54,7 @@ def test_export_all_writes_five_files(tmp_path):
     paths = export_all(tmp_path, accounts=accounts, notes=notes, ranks=ranks, typical_notes=tns)
     for key in ["accounts", "notes", "account_rank", "typical_notes", "report_input"]:
         assert Path(paths[key]).exists()
+    assert "comments" not in paths
 
     with open(tmp_path / "accounts.csv", encoding="utf-8") as f:
         rows = list(csv.reader(f))
@@ -69,3 +70,32 @@ def test_export_all_writes_five_files(tmp_path):
 
     md = (tmp_path / "report_input.md").read_text(encoding="utf-8")
     assert "作者甲" in md
+
+
+def test_export_all_writes_comments_and_weaves_top_report_comments(tmp_path):
+    accounts, notes, ranks, tns = _data()
+    comments = [
+        Comment(body="低赞评论", note_id="N1", like_count=3, collected_at="2026"),
+        Comment(body="高赞评论", note_id="N1", like_count=20, collected_at="2026"),
+        Comment(body="其他笔记评论", note_id="N2", like_count=99, collected_at="2026"),
+    ]
+
+    paths = export_all(
+        tmp_path,
+        accounts=accounts,
+        notes=notes,
+        ranks=ranks,
+        typical_notes=tns,
+        comments=comments,
+        comment_top_k=1,
+    )
+
+    with open(paths["comments"], encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert rows[0] == ["body", "note_id", "like_count", "collected_at"]
+    assert rows[1] == ["低赞评论", "N1", "3", "2026"]
+
+    md = (tmp_path / "report_input.md").read_text(encoding="utf-8")
+    assert "高赞评论" in md
+    assert "低赞评论" not in md
+    assert "其他笔记评论" not in md

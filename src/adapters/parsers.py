@@ -6,7 +6,7 @@
 import json
 from datetime import datetime, timezone
 
-from src.models import Account, Note
+from src.models import Account, Comment, Note
 
 
 def normalize_count(raw) -> int:
@@ -72,6 +72,15 @@ def parse_account(row: dict, *, keyword: str, collected_at: str) -> Account:
     )
 
 
+def parse_comment(row: dict, *, collected_at: str) -> Comment:
+    return Comment(
+        body=row.get("content", ""),
+        note_id=row.get("note_id", ""),
+        like_count=normalize_count(row.get("like_count")),
+        collected_at=collected_at,
+    )
+
+
 def parse_jsonl_lines(
     lines, *, keyword: str, collected_at: str, raw_path: str
 ) -> tuple[list[Note], list[Account]]:
@@ -85,3 +94,14 @@ def parse_jsonl_lines(
         notes.append(parse_note(row, keyword=keyword, collected_at=collected_at, raw_path=raw_path))
         accounts.append(parse_account(row, keyword=keyword, collected_at=collected_at))
     return notes, accounts
+
+
+def parse_comments_jsonl_lines(lines, *, collected_at: str) -> list[Comment]:
+    comments: list[Comment] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        comments.append(parse_comment(row, collected_at=collected_at))
+    return comments

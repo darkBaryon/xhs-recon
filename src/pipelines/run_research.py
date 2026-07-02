@@ -27,6 +27,7 @@ def _now_iso() -> str:
 
 def _build_adapter(config: dict) -> ResearchAdapter:
     provider = config.get("provider", "fixture")
+    comments_path = config.get("comments", {}).get("fixture_path")
     if provider == "mediacrawler":
         mc_dir = config["mediacrawler_dir"]
         if Path(mc_dir).exists():
@@ -39,8 +40,8 @@ def _build_adapter(config: dict) -> ResearchAdapter:
                 max_notes=config.get("search", {}).get("limit", 20),
             )
         # 路径 (a)：MediaCrawler 目录不可用 → 启动降级 fixture
-        return FixtureAdapter(config["fixture_path"])
-    return FixtureAdapter(config["fixture_path"])
+        return FixtureAdapter(config["fixture_path"], comments_path=comments_path)
+    return FixtureAdapter(config["fixture_path"], comments_path=comments_path)
 
 
 def run_research(config_path: str) -> dict[str, str]:
@@ -63,8 +64,28 @@ def run_research(config_path: str) -> dict[str, str]:
     top = config.get("selection", {}).get("top_notes_per_account", 2)
     typical = select_typical_notes(notes, top)
 
+    comments_cfg = config.get("comments", {})
+    comments = []
+    if comments_cfg.get("enabled"):
+        try:
+            comment_result = adapter.fetch_comments(
+                typical, comments_cfg.get("limit", 10), collected_at
+            )
+        except NotImplementedError:
+            comment_result = None
+        if comment_result and comment_result.ok:
+            comments = comment_result.comments
+
     out_dir = config.get("export", {}).get("out_dir", "data/exports")
-    return export_all(out_dir, accounts=accounts, notes=notes, ranks=ranks, typical_notes=typical)
+    return export_all(
+        out_dir,
+        accounts=accounts,
+        notes=notes,
+        ranks=ranks,
+        typical_notes=typical,
+        comments=comments,
+        comment_top_k=comments_cfg.get("report_top_k", 3),
+    )
 
 
 @app.command()

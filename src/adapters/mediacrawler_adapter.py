@@ -9,9 +9,9 @@ import re
 import subprocess
 from pathlib import Path
 
-from src.adapters.parsers import parse_jsonl_lines
+from src.adapters.parsers import parse_comments_jsonl_lines, parse_jsonl_lines
 from src.core.ports import ResearchAdapter
-from src.models import Account, FetchResult, Note
+from src.models import Account, FetchResult, Note, TypicalNote
 
 
 def _safe_dirname(s: str) -> str:
@@ -80,6 +80,37 @@ class MediaCrawlerAdapter(ResearchAdapter):
             cmd += ["--cookies", self.cookies]
         return cmd
 
+    def _build_comments_command(self, urls: list[str], limit: int, save_path: Path) -> list[str]:
+        cmd = [
+            *self.launcher,
+            "main.py",
+            "--platform",
+            "xhs",
+            "--type",
+            "detail",
+            "--specified_id",
+            ",".join(urls),
+            "--get_comment",
+            "yes",
+            "--get_sub_comment",
+            "no",
+            "--max_comments_count_singlenotes",
+            str(limit),
+            "--save_data_option",
+            "jsonl",
+            "--save_data_path",
+            str(save_path),
+            "--enable_ip_proxy",
+            "no",
+            "--max_concurrency_num",
+            "1",
+            "--lt",
+            self.login_type,
+        ]
+        if self.cookies:
+            cmd += ["--cookies", self.cookies]
+        return cmd
+
     def _run_crawler(self, cmd: list[str]) -> tuple[int, str]:
         """实跑 MediaCrawler；单测注入此点以避免真实采集。"""
         p = subprocess.run(
@@ -87,6 +118,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             cwd=self.mediacrawler_dir,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=self.timeout,
         )
         return p.returncode, (p.stdout + p.stderr)
@@ -102,10 +134,19 @@ class MediaCrawlerAdapter(ResearchAdapter):
             lines, keyword=keyword, collected_at=collected_at, raw_path=str(save_path)
         )
 
-    def _err(self, keyword, page, collected_at, cmd, msg, save_path=None) -> FetchResult:
+    def _read_comments(self, save_path: Path, collected_at: str):
+        files = sorted(Path(save_path).glob("xhs/jsonl/*_comments_*.jsonl"))
+        lines: list[str] = []
+        for f in files:
+            lines.extend(f.read_text(encoding="utf-8").splitlines())
+        return parse_comments_jsonl_lines(lines, collected_at=collected_at)
+
+    def _err(
+        self, keyword, page, collected_at, cmd, msg, save_path=None, operation: str = "search"
+    ) -> FetchResult:
         return FetchResult(
             provider=self.provider_name,
-            operation="search",
+            operation=operation,
             collected_at=collected_at,
             keyword=keyword,
             page=page,
@@ -119,7 +160,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         cmd = self._build_command(keyword, page, limit, save_path)
         try:
             rc, out = self._run_crawler(cmd)
-        except (OSError, subprocess.SubprocessError) as e:
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
             return self._err(keyword, page, collected_at, cmd, f"run failed: {e}")
         if rc != 0:
             return self._err(keyword, page, collected_at, cmd, f"exit {rc}: {out[-300:]}")
@@ -136,6 +177,63 @@ class MediaCrawlerAdapter(ResearchAdapter):
             page=page,
             notes=notes,
             accounts=accounts,
+            raw_path=str(save_path),
+            command=" ".join(cmd),
+        )
+
+    def fetch_comments(
+        self, notes: list[TypicalNote], limit: int, collected_at: str
+    ) -> FetchResult:
+        urls = [n.url for n in notes if n.url]
+        if not urls:
+            return FetchResult(
+                provider=self.provider_name,
+                operation="fetch_comments",
+                collected_at=collected_at,
+                comments=[],
+            )
+
+        save_path = self._save_path(collected_at + "-comments")
+        cmd = self._build_comments_command(urls, limit, save_path)
+        try:
+            rc, out = self._run_crawler(cmd)
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+            return self._err(
+                None,
+                None,
+                collected_at,
+                cmd,
+                f"run failed: {e}",
+                save_path,
+                operation="fetch_comments",
+            )
+        if rc != 0:
+            return self._err(
+                None,
+                None,
+                collected_at,
+                cmd,
+                f"exit {rc}: {out[-300:]}",
+                save_path,
+                operation="fetch_comments",
+            )
+        try:
+            comments = self._read_comments(save_path, collected_at)
+        except (OSError, ValueError) as e:
+            return self._err(
+                None,
+                None,
+                collected_at,
+                cmd,
+                f"read comments failed: {e}",
+                save_path,
+                operation="fetch_comments",
+            )
+        return FetchResult(
+            provider=self.provider_name,
+            operation="fetch_comments",
+            collected_at=collected_at,
+            comments=comments,
             raw_path=str(save_path),
             command=" ".join(cmd),
         )
