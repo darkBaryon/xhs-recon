@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 
 from src.core.exporter import export_all
-from src.models import Account, AccountRank, Comment, Note, TypicalNote
+from src.models import Account, AccountRank, Comment, Note, TypicalNote, WatchAccount
 
 
 def _data():
@@ -55,6 +55,10 @@ def test_export_all_writes_five_files(tmp_path):
     for key in ["accounts", "notes", "account_rank", "typical_notes", "report_input"]:
         assert Path(paths[key]).exists()
     assert "comments" not in paths
+    assert "watchlist" not in paths
+    assert "creator_notes" not in paths
+    assert not (tmp_path / "watchlist.csv").exists()
+    assert not (tmp_path / "creator_notes.csv").exists()
 
     with open(tmp_path / "accounts.csv", encoding="utf-8") as f:
         rows = list(csv.reader(f))
@@ -99,3 +103,45 @@ def test_export_all_writes_comments_and_weaves_top_report_comments(tmp_path):
     assert "高赞评论" in md
     assert "低赞评论" not in md
     assert "其他笔记评论" not in md
+
+
+def test_export_all_writes_watchlist_and_creator_notes_when_passed(tmp_path):
+    accounts, notes, ranks, tns = _data()
+    watchlist = [WatchAccount(account_id="U1", nickname="作者甲", source="manual")]
+
+    paths = export_all(
+        tmp_path,
+        accounts=accounts,
+        notes=notes,
+        ranks=ranks,
+        typical_notes=tns,
+        watchlist=watchlist,
+        creator_notes=notes,
+    )
+
+    with open(paths["watchlist"], encoding="utf-8") as f:
+        watch_rows = list(csv.reader(f))
+    assert watch_rows == [
+        ["account_id", "nickname", "source"],
+        ["U1", "作者甲", "manual"],
+    ]
+
+    with open(paths["creator_notes"], encoding="utf-8") as f:
+        creator_rows = list(csv.reader(f))
+    assert creator_rows[0] == [
+        "note_id",
+        "account_id",
+        "title",
+        "body",
+        "tags",
+        "url",
+        "like_count",
+        "collect_count",
+        "comment_count",
+        "published_at",
+        "collected_at",
+        "source_keywords",
+        "raw_path",
+    ]
+    assert creator_rows[1][0] == "N1"
+    assert creator_rows[1][11] == "留学辅导"

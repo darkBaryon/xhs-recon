@@ -2,8 +2,13 @@ import csv
 import re
 from pathlib import Path
 
+import pytest
+import typer
 import yaml
 
+from src.adapters.fixture_adapter import FixtureAdapter
+from src.core.ports import ResearchAdapter
+from src.models import Account, FetchResult, Note
 from src.pipelines.run_research import run_research
 
 
@@ -34,6 +39,55 @@ def _report_note_ids(path: Path) -> set[str]:
     return set(re.findall(r"xiaohongshu\.com/explore/([^?\\)]+)", text))
 
 
+class _NoCreatorCallAdapter(FixtureAdapter):
+    def fetch_creator_notes(self, account_ids, limit, collected_at):
+        raise AssertionError("fetch_creator_notes should not be called")
+
+
+class _PartialCreatorAdapter(ResearchAdapter):
+    provider_name = "partial-fixture"
+
+    def __init__(self):
+        self._fixture = FixtureAdapter("tests/fixtures/search_contents_sample.jsonl")
+
+    def search(self, keyword, page, limit, collected_at):
+        return self._fixture.search(keyword, page, limit, collected_at)
+
+    def fetch_creator_notes(self, account_ids, limit, collected_at):
+        note = Note(
+            note_id="creator-ok-1",
+            account_id=account_ids[0],
+            title="成功账号主页笔记",
+            body="body",
+            tags=[],
+            url="https://example.com/creator-ok-1",
+            like_count=0,
+            collect_count=0,
+            comment_count=0,
+            published_at="2026",
+            collected_at=collected_at,
+            source_keywords=[],
+            raw_path="raw/creator",
+        )
+        account = Account(
+            account_id=account_ids[0],
+            nickname="成功昵称",
+            source_keywords=[],
+            note_count=1,
+            first_seen_at=collected_at,
+            last_seen_at=collected_at,
+        )
+        return FetchResult(
+            provider=self.provider_name,
+            operation="creator_notes",
+            collected_at=collected_at,
+            notes=[note],
+            accounts=[account],
+            raw_path="raw/creator",
+            error="creator fetch failed: failed-id",
+        )
+
+
 def test_pipeline_end_to_end(tmp_path):
     cfg = _cfg(tmp_path)
     cfg_path = tmp_path / "cfg.yaml"
@@ -53,6 +107,150 @@ def test_pipeline_end_to_end(tmp_path):
     assert md.strip() != ""
     # 按运行归档：导出落在 out_dir 下的时间戳子目录
     assert Path(paths["report_input"]).parent.parent == tmp_path
+
+
+def test_pipeline_without_watchlist_does_not_call_fetch_creator_notes(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr(
+        "src.pipelines.run_research._build_adapter",
+        lambda config: _NoCreatorCallAdapter("tests/fixtures/search_contents_sample.jsonl"),
+    )
+    cfg = _cfg(tmp_path)
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+
+    paths = run_research(str(cfg_path))
+
+    assert "watchlist" not in paths
+    assert "creator_notes" not in paths
+
+
+def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    base_cfg = _cfg(tmp_path / "base")
+    watch_cfg = _cfg(tmp_path / "watch")
+    watch_cfg["creator_fixture_path"] = "tests/fixtures/creator_contents_sample.jsonl"
+    watch_cfg["watchlist"] = {
+        "auto_top_n": 2,
+        "manual": [
+            "https://www.xiaohongshu.com/user/profile/601d0481000000000101cc46?xsec_token=demo"
+        ],
+        "max_total": 5,
+    }
+    watch_cfg["creator"] = {"notes_per_account": 3}
+
+    base_cfg_path = tmp_path / "base.yaml"
+    watch_cfg_path = tmp_path / "watch.yaml"
+    base_cfg_path.write_text(yaml.safe_dump(base_cfg, allow_unicode=True), encoding="utf-8")
+    watch_cfg_path.write_text(yaml.safe_dump(watch_cfg, allow_unicode=True), encoding="utf-8")
+
+    base_paths = run_research(str(base_cfg_path))
+    watch_paths = run_research(str(watch_cfg_path))
+
+    assert set(watch_paths) == {
+        "accounts",
+        "notes",
+        "account_rank",
+        "typical_notes",
+        "report_input",
+        "watchlist",
+        "creator_notes",
+    }
+    for key in ["accounts", "notes", "account_rank", "typical_notes", "report_input"]:
+        assert Path(watch_paths[key]).read_bytes() == Path(base_paths[key]).read_bytes()
+
+    watch_rows = _csv_rows(Path(watch_paths["watchlist"]))
+    assert watch_rows[0] == {
+        "account_id": "601d0481000000000101cc46",
+        "nickname": "陈皮糖",
+        "source": "manual",
+    }
+    assert [row["source"] for row in watch_rows] == ["manual", "auto", "auto"]
+
+    creator_rows = _csv_rows(Path(watch_paths["creator_notes"]))
+    assert [row["note_id"] for row in creator_rows] == [
+        "6a4661cd0000000017029d86",
+        "6a4661a0000000001702c88e",
+    ]
+    assert all(row["source_keywords"] == "" for row in creator_rows)
+
+
+def test_pipeline_invalid_manual_ref_fails_fast(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    cfg = _cfg(tmp_path)
+    cfg["watchlist"] = {
+        "auto_top_n": 0,
+        "manual": ["https://example.com/user/profile/601d0481000000000101cc46"],
+        "max_total": 5,
+    }
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+
+    with pytest.raises(typer.Exit) as e:
+        run_research(str(cfg_path))
+
+    assert e.value.exit_code == 1
+    assert "https://example.com/user/profile/601d0481000000000101cc46" in capsys.readouterr().err
+
+
+def test_pipeline_adapter_without_creator_support_exports_empty_creator_header(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    cfg = _cfg(tmp_path)
+    cfg["watchlist"] = {
+        "auto_top_n": 0,
+        "manual": ["601d0481000000000101cc46"],
+        "max_total": 5,
+    }
+    cfg["creator"] = {"notes_per_account": 3}
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+
+    paths = run_research(str(cfg_path))
+
+    with open(paths["creator_notes"], encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert len(rows) == 1
+    assert rows[0][0:3] == ["note_id", "account_id", "title"]
+    assert _csv_rows(Path(paths["watchlist"])) == [
+        {"account_id": "601d0481000000000101cc46", "nickname": "", "source": "manual"}
+    ]
+
+
+def test_pipeline_partial_creator_failure_still_exports_success_notes(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr(
+        "src.pipelines.run_research._build_adapter",
+        lambda config: _PartialCreatorAdapter(),
+    )
+    cfg = _cfg(tmp_path)
+    cfg["watchlist"] = {
+        "auto_top_n": 0,
+        "manual": ["601d0481000000000101cc46"],
+        "max_total": 5,
+    }
+    cfg["creator"] = {"notes_per_account": 3}
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        paths = run_research(str(cfg_path))
+
+    creator_rows = _csv_rows(Path(paths["creator_notes"]))
+    assert [row["note_id"] for row in creator_rows] == ["creator-ok-1"]
+    assert _csv_rows(Path(paths["watchlist"])) == [
+        {
+            "account_id": "601d0481000000000101cc46",
+            "nickname": "成功昵称",
+            "source": "manual",
+        }
+    ]
+    assert "creator fetch failed: failed-id" in caplog.text
 
 
 def test_pipeline_window_filters_before_aggregate(tmp_path, monkeypatch, capsys):

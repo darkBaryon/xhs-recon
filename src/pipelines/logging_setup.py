@@ -21,7 +21,7 @@ FILE_FORMAT = (
 )
 
 # 评论采集等操作名 → 人话（log_result 失败行用）
-_OP_CN = {"search": "搜索", "fetch_comments": "评论采集"}
+_OP_CN = {"search": "搜索", "fetch_comments": "评论采集", "creator_notes": "创作者笔记采集"}
 
 
 class ConsoleFormatter(logging.Formatter):

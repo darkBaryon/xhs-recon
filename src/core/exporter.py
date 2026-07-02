@@ -6,7 +6,7 @@
 import csv
 from pathlib import Path
 
-from src.models import Account, AccountRank, Comment, Note, TypicalNote
+from src.models import Account, AccountRank, Comment, Note, TypicalNote, WatchAccount
 
 PIPE = "|"
 
@@ -68,6 +68,8 @@ def export_all(
     typical_notes: list[TypicalNote],
     comments: list[Comment] = [],
     comment_top_k: int = 3,
+    watchlist: list[WatchAccount] | None = None,
+    creator_notes: list[Note] | None = None,
 ) -> dict[str, str]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -168,6 +170,49 @@ def export_all(
             out / "comments.csv",
             ["body", "note_id", "like_count", "collected_at"],
             [[c.body, c.note_id, c.like_count, c.collected_at] for c in comments],
+        )
+    if watchlist is not None:
+        paths["watchlist"] = _write_csv(
+            out / "watchlist.csv",
+            ["account_id", "nickname", "source"],
+            [[w.account_id, w.nickname, w.source] for w in watchlist],
+        )
+    if creator_notes is not None:
+        paths["creator_notes"] = _write_csv(
+            out / "creator_notes.csv",
+            [
+                "note_id",
+                "account_id",
+                "title",
+                "body",
+                "tags",
+                "url",
+                "like_count",
+                "collect_count",
+                "comment_count",
+                "published_at",
+                "collected_at",
+                "source_keywords",
+                "raw_path",
+            ],
+            [
+                [
+                    n.note_id,
+                    n.account_id,
+                    n.title,
+                    n.body,
+                    _join(n.tags),
+                    n.url,
+                    n.like_count,
+                    n.collect_count,
+                    n.comment_count,
+                    n.published_at,
+                    n.collected_at,
+                    _join(n.source_keywords),
+                    n.raw_path,
+                ]
+                for n in creator_notes
+            ],
         )
     paths["report_input"] = _write_report(
         out / "report_input.md", ranks, typical_notes, comments, comment_top_k

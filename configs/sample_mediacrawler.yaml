@@ -18,6 +18,13 @@ ranking:
     note_count: 10
     keyword_hit: 5
     interaction: 0.01
+watchlist:
+  auto_top_n: 2
+  manual:
+    - 601d0481000000000101cc46
+  max_total: 5
+creator:
+  notes_per_account: 10
 selection:
   top_notes_per_account: 2
   half_life_days: 14
