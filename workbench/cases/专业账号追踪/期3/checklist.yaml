@@ -1,0 +1,37 @@
+# 专业账号追踪 期3 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 workbench/tools/preflight.py --config workbench/cases/专业账号追踪/期3/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+# 注：本期纯 core/exporter/pipeline 计算与导出，MediaCrawler fork 与 adapters 零改动；
+#     真实数据复算属 Gate 2 手动验收，不进本表（见方案 §6）
+
+必过命令:                  # 退出码须 0
+  - { name: lint,         run: "uv run ruff check ." }
+  - { name: format,       run: "uv run ruff format --check ." }
+  - { name: tests,        run: "uv run pytest -q" }
+  - { name: demo-fixture, run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+  - { name: no-touch,     run: "git diff --quiet c933f9e -- src/core/aggregator.py src/adapters src/core/time_window.py src/core/note_selector.py src/core/watchlist.py src/core/ports.py" }   # 方案 §3 非目标的机械兜底：本期只动 models/account_ranker/exporter/run_research
+                           # 注：实施前若 main HEAD 已从 c933f9e 漂移，须先重跑 git log -1 c933f9e 确认起点有效、并核对漂移未涉本项路径（沿期2 口径）
+
+必存产物:                  # demo（fixture，sample.yaml 开 watchlist 段）跑完后须存在
+  - data/exports/latest/accounts.csv          # 旧 5 文件契约不变
+  - data/exports/latest/notes.csv
+  - data/exports/latest/account_rank.csv
+  - data/exports/latest/typical_notes.csv
+  - data/exports/latest/report_input.md
+  - data/exports/latest/watchlist.csv         # 期2 契约不变
+  - data/exports/latest/creator_notes.csv
+  - data/exports/latest/account_profile.csv   # 本期新增
+  - data/exports/latest/topic_feed.md         # 本期新增
+  - data/exports/latest/topic_feed.jsonl      # 本期新增
+
+必含符号:                  # 本期新增接口必须落地（grep 命中 ≥1）
+  - { grep: "vertical_ratio",          in: "src/models.py" }
+  - { grep: "recent_note_count",       in: "src/models.py" }
+  - { grep: "def profile_accounts",    in: "src/core/account_ranker.py" }
+  - { grep: "account_profile.csv",     in: "src/core/exporter.py" }
+  - { grep: "topic_feed.jsonl",        in: "src/core/exporter.py" }
+  - { grep: "profile_accounts",        in: "src/pipelines/run_research.py" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",     in: "src/core" }        # 铁律：core 平台无关
+  - { grep: "print(",  in: "src" }             # 调试残留

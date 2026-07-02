@@ -18,6 +18,8 @@ ranking:
     note_count: 10
     keyword_hit: 5
     interaction: 0.01
+    vertical: 10.0
+    activity: 1.0
 watchlist:
   auto_top_n: 2
   manual:

@@ -14,7 +14,7 @@ import yaml
 from src.adapters.fixture_adapter import FixtureAdapter
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
 from src.adapters.parsers import normalize_creator_ref
-from src.core.account_ranker import rank_accounts
+from src.core.account_ranker import profile_accounts, rank_accounts
 from src.core.aggregator import aggregate
 from src.core.exporter import export_all
 from src.core.keyword_expander import expand_keywords
@@ -115,6 +115,7 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     search_cfg = config.get("search", {})
     pages = search_cfg.get("pages", 1)
     limit = search_cfg.get("limit", 20)
+    window_days = search_cfg.get("window_days", 0)
 
     results = []
     for kw in keywords:
@@ -133,14 +134,18 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
             )
             results.append(result)
 
-    results = _apply_time_window(results, search_cfg.get("window_days", 0), collected_at)
+    results = _apply_time_window(results, window_days, collected_at)
     notes, accounts = aggregate(results)
     logger.info("聚合去重：笔记 %d · 账号 %d", len(notes), len(accounts))
-    ranks = rank_accounts(accounts, notes, config.get("ranking", {}).get("weights"))
+    ranking_weights = config.get("ranking", {}).get("weights")
+    ranks = rank_accounts(accounts, notes, ranking_weights)
     logger.info("账号打分：%d 个", len(ranks))
 
     watchlist = None
     creator_notes = None
+    account_profiles = None
+    topic_feed_notes = None
+    topic_feed_stats = None
     watchlist_cfg = config.get("watchlist")
     if watchlist_cfg is not None:
         try:
@@ -179,6 +184,21 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
                 logger.info("创作者笔记：采到 %d 条", len(creator_notes))
         else:
             logger.info("watchlist：为空，跳过创作者笔记采集")
+        account_profiles = profile_accounts(
+            watchlist,
+            creator_notes,
+            keywords,
+            window_days,
+            collected_at,
+            ranking_weights,
+        )
+        topic_feed_notes, topic_feed_stats = filter_notes(creator_notes, window_days, collected_at)
+        logger.info(
+            "topic_feed：kept=%d out_of_window=%d missing_time=%d",
+            topic_feed_stats.kept,
+            topic_feed_stats.out_of_window,
+            topic_feed_stats.missing_time,
+        )
 
     selection_cfg = config.get("selection", {})
     top = selection_cfg.get("top_notes_per_account", 2)
@@ -225,6 +245,10 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
         comment_top_k=comments_cfg.get("report_top_k", 3),
         watchlist=watchlist,
         creator_notes=creator_notes,
+        account_profiles=account_profiles,
+        topic_feed=topic_feed_notes,
+        topic_feed_stats=topic_feed_stats,
+        topic_feed_window_days=window_days,
     )
     _update_latest_link(out_base, run_dir)
     logger.info("✓ 导出 %d 个文件 → %s", len(paths), run_dir)

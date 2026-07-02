@@ -1,7 +1,9 @@
 import csv
+import json
 from pathlib import Path
 
 from src.core.exporter import export_all
+from src.core.time_window import WindowFilterStats
 from src.models import Account, AccountRank, Comment, Note, TypicalNote, WatchAccount
 
 
@@ -57,8 +59,14 @@ def test_export_all_writes_five_files(tmp_path):
     assert "comments" not in paths
     assert "watchlist" not in paths
     assert "creator_notes" not in paths
+    assert "account_profile" not in paths
+    assert "topic_feed" not in paths
+    assert "topic_feed_jsonl" not in paths
     assert not (tmp_path / "watchlist.csv").exists()
     assert not (tmp_path / "creator_notes.csv").exists()
+    assert not (tmp_path / "account_profile.csv").exists()
+    assert not (tmp_path / "topic_feed.md").exists()
+    assert not (tmp_path / "topic_feed.jsonl").exists()
 
     with open(tmp_path / "accounts.csv", encoding="utf-8") as f:
         rows = list(csv.reader(f))
@@ -145,3 +153,108 @@ def test_export_all_writes_watchlist_and_creator_notes_when_passed(tmp_path):
     ]
     assert creator_rows[1][0] == "N1"
     assert creator_rows[1][11] == "留学辅导"
+
+
+def test_export_all_writes_account_profile_when_passed(tmp_path):
+    accounts, notes, ranks, tns = _data()
+    profiles = [
+        AccountRank(
+            account_id="U1",
+            nickname="作者甲",
+            relevant_note_count=0,
+            keyword_hit_count=0,
+            avg_interaction=0.0,
+            account_score=0.0,
+            note_ids=[],
+            vertical_ratio=2 / 3,
+            recent_note_count=12,
+            profile_score=18.666,
+        )
+    ]
+
+    paths = export_all(
+        tmp_path,
+        accounts=accounts,
+        notes=notes,
+        ranks=ranks,
+        typical_notes=tns,
+        account_profiles=profiles,
+    )
+
+    with open(paths["account_profile"], encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert rows == [
+        ["account_id", "nickname", "vertical_ratio", "recent_note_count", "profile_score"],
+        ["U1", "作者甲", "0.6667", "12", "18.67"],
+    ]
+
+
+def test_export_all_writes_topic_feed_when_passed(tmp_path):
+    accounts, notes, ranks, tns = _data()
+    watchlist = [
+        WatchAccount(account_id="U2", nickname="作者乙", source="auto"),
+        WatchAccount(account_id="U1", nickname="作者甲", source="manual"),
+    ]
+    feed_notes = [
+        notes[0].model_copy(
+            update={
+                "note_id": "N-old",
+                "title": "旧标题",
+                "published_at": "2026-07-01T00:00:00+00:00",
+            }
+        ),
+        notes[0].model_copy(
+            update={
+                "note_id": "N-new",
+                "title": "新标题",
+                "published_at": "2026-07-03T00:00:00+00:00",
+            }
+        ),
+        notes[0].model_copy(
+            update={
+                "note_id": "N-u2",
+                "account_id": "U2",
+                "title": "乙标题",
+                "published_at": "2026-07-02T00:00:00+00:00",
+            }
+        ),
+    ]
+
+    paths = export_all(
+        tmp_path,
+        accounts=accounts,
+        notes=notes,
+        ranks=ranks,
+        typical_notes=tns,
+        watchlist=watchlist,
+        topic_feed=feed_notes,
+        topic_feed_stats=WindowFilterStats(kept=3, out_of_window=1, missing_time=1),
+        topic_feed_window_days=30,
+    )
+
+    jsonl_text = Path(paths["topic_feed_jsonl"]).read_text(encoding="utf-8")
+    assert "\\u4f5c" not in jsonl_text
+    json_rows = [json.loads(line) for line in jsonl_text.splitlines()]
+    assert [row["note_id"] for row in json_rows] == ["N-u2", "N-new", "N-old"]
+    assert set(json_rows[0]) == {
+        "account_id",
+        "nickname",
+        "source",
+        "note_id",
+        "title",
+        "body",
+        "tags",
+        "url",
+        "published_at",
+        "collected_at",
+        "like_count",
+        "collect_count",
+        "comment_count",
+    }
+    assert json_rows[0]["nickname"] == "作者乙"
+    assert json_rows[1]["source"] == "manual"
+
+    md = Path(paths["topic_feed"]).read_text(encoding="utf-8")
+    assert md.splitlines()[0] == "窗口 30 天 · 入 feed 3 条 · 出窗 1 · 缺时间 1 · 账号 2"
+    assert md.index("## 作者乙（U2）") < md.index("## 作者甲（U1）")
+    assert md.index("乙标题") < md.index("新标题") < md.index("旧标题")
