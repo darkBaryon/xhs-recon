@@ -146,6 +146,121 @@ def _write_topic_feed_md(
     return str(path)
 
 
+def export_watch_side(
+    out_dir,
+    *,
+    watchlist: list[WatchAccount] | None = None,
+    creator_notes: list[Note] | None = None,
+    account_profiles: list[AccountRank] | None = None,
+    topic_feed: list[Note] | None = None,
+    topic_feed_stats: WindowFilterStats | None = None,
+    topic_feed_window_days: int = 0,
+) -> dict[str, str]:
+    """watchlist 侧四件的子集出口（None = 不写）；export_all 委托，sync 命令单独调用。"""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, str] = {}
+    if watchlist is not None:
+        paths["watchlist"] = _write_csv(
+            out / "watchlist.csv",
+            ["account_id", "nickname", "source"],
+            [[w.account_id, w.nickname, w.source] for w in watchlist],
+        )
+    if creator_notes is not None:
+        paths["creator_notes"] = _write_csv(
+            out / "creator_notes.csv",
+            [
+                "note_id",
+                "account_id",
+                "title",
+                "body",
+                "tags",
+                "url",
+                "like_count",
+                "collect_count",
+                "comment_count",
+                "published_at",
+                "collected_at",
+                "source_keywords",
+                "raw_path",
+            ],
+            [
+                [
+                    n.note_id,
+                    n.account_id,
+                    n.title,
+                    n.body,
+                    _join(n.tags),
+                    n.url,
+                    n.like_count,
+                    n.collect_count,
+                    n.comment_count,
+                    n.published_at,
+                    n.collected_at,
+                    _join(n.source_keywords),
+                    n.raw_path,
+                ]
+                for n in creator_notes
+            ],
+        )
+    if account_profiles is not None:
+        paths["account_profile"] = _write_csv(
+            out / "account_profile.csv",
+            [
+                "account_id",
+                "nickname",
+                "vertical_ratio",
+                "recent_note_count",
+                "profile_score",
+            ],
+            [
+                [
+                    r.account_id,
+                    r.nickname,
+                    f"{r.vertical_ratio:.4f}",
+                    r.recent_note_count,
+                    f"{r.profile_score:.2f}",
+                ]
+                for r in account_profiles
+            ],
+        )
+    if topic_feed is not None:
+        stats = topic_feed_stats or WindowFilterStats(
+            kept=len(topic_feed), out_of_window=0, missing_time=0
+        )
+        paths["topic_feed_jsonl"] = _write_topic_feed_jsonl(
+            out / "topic_feed.jsonl", topic_feed, watchlist
+        )
+        paths["topic_feed"] = _write_topic_feed_md(
+            out / "topic_feed.md", topic_feed, stats, topic_feed_window_days, watchlist
+        )
+    return paths
+
+
+def export_comments(
+    out_dir,
+    *,
+    ranks: list[AccountRank],
+    typical_notes: list[TypicalNote],
+    comments: list[Comment],
+    comment_top_k: int = 3,
+) -> dict[str, str]:
+    """comments.csv（评论非空时）+ report_input.md（无条件重写）的子集出口。"""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, str] = {}
+    if comments:
+        paths["comments"] = _write_csv(
+            out / "comments.csv",
+            ["body", "note_id", "like_count", "collected_at"],
+            [[c.body, c.note_id, c.like_count, c.collected_at] for c in comments],
+        )
+    paths["report_input"] = _write_report(
+        out / "report_input.md", ranks, typical_notes, comments, comment_top_k
+    )
+    return paths
+
+
 def export_all(
     out_dir,
     *,
@@ -256,87 +371,24 @@ def export_all(
             for t in typical_notes
         ],
     )
-    if comments:
-        paths["comments"] = _write_csv(
-            out / "comments.csv",
-            ["body", "note_id", "like_count", "collected_at"],
-            [[c.body, c.note_id, c.like_count, c.collected_at] for c in comments],
+    paths.update(
+        export_watch_side(
+            out,
+            watchlist=watchlist,
+            creator_notes=creator_notes,
+            account_profiles=account_profiles,
+            topic_feed=topic_feed,
+            topic_feed_stats=topic_feed_stats,
+            topic_feed_window_days=topic_feed_window_days,
         )
-    if watchlist is not None:
-        paths["watchlist"] = _write_csv(
-            out / "watchlist.csv",
-            ["account_id", "nickname", "source"],
-            [[w.account_id, w.nickname, w.source] for w in watchlist],
+    )
+    paths.update(
+        export_comments(
+            out,
+            ranks=ranks,
+            typical_notes=typical_notes,
+            comments=comments,
+            comment_top_k=comment_top_k,
         )
-    if creator_notes is not None:
-        paths["creator_notes"] = _write_csv(
-            out / "creator_notes.csv",
-            [
-                "note_id",
-                "account_id",
-                "title",
-                "body",
-                "tags",
-                "url",
-                "like_count",
-                "collect_count",
-                "comment_count",
-                "published_at",
-                "collected_at",
-                "source_keywords",
-                "raw_path",
-            ],
-            [
-                [
-                    n.note_id,
-                    n.account_id,
-                    n.title,
-                    n.body,
-                    _join(n.tags),
-                    n.url,
-                    n.like_count,
-                    n.collect_count,
-                    n.comment_count,
-                    n.published_at,
-                    n.collected_at,
-                    _join(n.source_keywords),
-                    n.raw_path,
-                ]
-                for n in creator_notes
-            ],
-        )
-    if account_profiles is not None:
-        paths["account_profile"] = _write_csv(
-            out / "account_profile.csv",
-            [
-                "account_id",
-                "nickname",
-                "vertical_ratio",
-                "recent_note_count",
-                "profile_score",
-            ],
-            [
-                [
-                    r.account_id,
-                    r.nickname,
-                    f"{r.vertical_ratio:.4f}",
-                    r.recent_note_count,
-                    f"{r.profile_score:.2f}",
-                ]
-                for r in account_profiles
-            ],
-        )
-    if topic_feed is not None:
-        stats = topic_feed_stats or WindowFilterStats(
-            kept=len(topic_feed), out_of_window=0, missing_time=0
-        )
-        paths["topic_feed_jsonl"] = _write_topic_feed_jsonl(
-            out / "topic_feed.jsonl", topic_feed, watchlist
-        )
-        paths["topic_feed"] = _write_topic_feed_md(
-            out / "topic_feed.md", topic_feed, stats, topic_feed_window_days, watchlist
-        )
-    paths["report_input"] = _write_report(
-        out / "report_input.md", ranks, typical_notes, comments, comment_top_k
     )
     return paths

@@ -23,6 +23,17 @@
 · `./run.sh real`（真实采集，自动确保采集浏览器就绪）
 · `./run.sh browser`（只起/查采集浏览器）。下面是各步骤的展开说明。
 
+**子命令（按需分段跑，共用同一份 config）**：
+
+```bash
+uv run python -m src.pipelines.cli search   --config configs/sample_mediacrawler.yaml  # 广角：关键词搜索+榜单（每周）
+uv run python -m src.pipelines.cli sync     --config configs/sample_mediacrawler.yaml  # 长焦：watchlist→creator→topic_feed（每周）
+uv run python -m src.pipelines.cli comments --config configs/sample_mediacrawler.yaml  # 深读：补采评论（做深度分析时）
+uv run python -m src.pipelines.cli research --config configs/sample_mediacrawler.yaml  # 全流程（= 旧入口）
+```
+
+推荐顺序 `search → sync → comments`：search 建当次运行目录，sync/comments **补全写回**同一目录（`latest` 始终指向这份逐步补全的研究快照）；sync 的 auto 名额读最近一次 search 的榜单（缺榜单则纯 manual）。旧入口 `python -m src.pipelines.run_research --config ...` 不变。
+
 ### 离线跑通（无需登录，随时可跑）
 
 ```bash

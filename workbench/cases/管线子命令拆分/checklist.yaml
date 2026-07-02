@@ -1,0 +1,41 @@
+# 管线子命令拆分 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 workbench/tools/preflight.py --config workbench/cases/管线子命令拆分/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+
+必过命令:                  # 退出码须 0
+  - { name: lint,          run: "uv run ruff check ." }
+  - { name: format,        run: "uv run ruff format --check ." }
+  - { name: tests,         run: "uv run pytest -q" }
+  - { name: demo-old,      run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+  - { name: demo-cli,      run: "uv run python -m src.pipelines.cli research --config configs/sample.yaml" }
+  - { name: no-touch,      run: "git diff --quiet e9640d1 -- src/core/__init__.py src/core/aggregator.py src/core/account_ranker.py src/core/keyword_expander.py src/core/note_selector.py src/core/ports.py src/core/time_window.py src/core/watchlist.py src/adapters src/models.py" }   # __init__.py 补入：评审 #2 建议3
+                           # 本期只动 src/pipelines/ 与 src/core/exporter.py（v2：exporter 提取式重构，由等价性 e2e 字节守护）
+                           # 注：实施前若 main HEAD 已从 e9640d1 漂移，须先重确认起点有效且漂移未涉本项路径
+
+必存产物:                  # demo（旧入口，sample.yaml）跑完后须存在（11 件契约不变）
+  - data/exports/latest/accounts.csv
+  - data/exports/latest/notes.csv
+  - data/exports/latest/account_rank.csv
+  - data/exports/latest/typical_notes.csv
+  - data/exports/latest/report_input.md
+  - data/exports/latest/watchlist.csv
+  - data/exports/latest/creator_notes.csv
+  - data/exports/latest/account_profile.csv
+  - data/exports/latest/topic_feed.md
+  - data/exports/latest/topic_feed.jsonl
+
+必含符号:                  # 本期新增接口必须落地（grep 命中 ≥1）
+  - { grep: "def _search_stage",    in: "src/pipelines/run_research.py" }
+  - { grep: "def _sync_stage",      in: "src/pipelines/run_research.py" }
+  - { grep: "def _comments_stage",  in: "src/pipelines/run_research.py" }
+  - { grep: "def load_ranks_csv",   in: "src/pipelines/artifacts.py" }
+  - { grep: "def load_typical_csv", in: "src/pipelines/artifacts.py" }
+  - { grep: "def resolve_latest_run_dir", in: "src/pipelines/artifacts.py" }
+  - { grep: "def sync",             in: "src/pipelines/cli.py" }
+  - { grep: "def comments",         in: "src/pipelines/cli.py" }
+  - { grep: "def export_watch_side", in: "src/core/exporter.py" }
+  - { grep: "def export_comments",  in: "src/core/exporter.py" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",     in: "src/core" }        # 铁律：core 平台无关
+  - { grep: "print(",  in: "src" }             # 调试残留
