@@ -6,7 +6,7 @@ mediacrawler:
   cookies: ""
   out_dir: data/raw                        # 真实采集 raw 落此（gitignore）
   timeout: 600                             # 单次子进程上限秒数（搜索每词/creator 每账号各一次）
-keywords_file: configs/keywords-留学辅导.yaml     # 词表资产外置（与 inline keywords/synonyms 互斥）
+keywords_file: configs/留学辅导/keywords.yaml     # 词表资产外置（与 inline keywords/synonyms 互斥）
 search:
   pages: 1
   limit: 20
@@ -19,7 +19,7 @@ ranking:
     interaction: 0.01
     vertical: 10.0
     activity: 1.0
-watchlist_file: configs/watchlist-留学辅导.yaml   # 账号资产外置（与 watchlist.manual 互斥）
+watchlist_file: configs/留学辅导/watchlist.yaml   # 账号资产外置（与 watchlist.manual 互斥）
 watchlist:
   auto_top_n: 2
   max_total: 30   # 2026-07-03 用户拍板：上限由 10 提至 30（用量口径变更）

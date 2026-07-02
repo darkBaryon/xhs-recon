@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # xhs-recon 启动脚本
 #   ./run.sh            # 离线 fixture demo（无需登录/浏览器）
-#   ./run.sh real       # 真实采集：自动确保采集浏览器就绪后运行（可加 --config xxx.yaml）
+#   ./run.sh search     # 真实·广角：关键词搜索+榜单（每周）
+#   ./run.sh sync       # 真实·长焦：watchlist→creator→topic_feed（每周）
+#   ./run.sh comments   # 真实·深读：补采评论（做深度分析时）
+#   ./run.sh real       # 真实·全流程（= research）
 #   ./run.sh browser    # 只启动/检查采集浏览器（专用 profile + CDP 9222）
+# 主题配置默认 configs/留学辅导/run.yaml，换赛道：CONFIG=configs/<主题>/run.yaml ./run.sh sync
 set -euo pipefail
 cd "$(dirname "$0")"
+
+CONFIG="${CONFIG:-configs/留学辅导/run.yaml}"
 
 CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PROFILE_DIR="$HOME/.xhs-recon-chrome"
@@ -41,15 +47,19 @@ case "$cmd" in
   demo)
     exec uv run python -m src.pipelines.run_research --config configs/sample.yaml "$@"
     ;;
+  search|sync|comments)
+    ensure_browser
+    exec uv run python -m src.pipelines.cli "$cmd" --config "$CONFIG" "$@"
+    ;;
   real)
     ensure_browser
-    exec uv run python scripts/integration_mediacrawler.py --config configs/sample_mediacrawler.yaml "$@"
+    exec uv run python -m src.pipelines.cli research --config "$CONFIG" "$@"
     ;;
   browser)
     ensure_browser
     ;;
   *)
-    echo "用法: ./run.sh [demo|real|browser]" >&2
+    echo "用法: ./run.sh [demo|search|sync|comments|real|browser]" >&2
     exit 2
     ;;
 esac

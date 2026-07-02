@@ -1,4 +1,4 @@
-# 测试用 watchlist（3 账号，验证 cli 链路用；日常跑用 watchlist-留学辅导.yaml）
+# 测试用 watchlist（3 账号，验证 cli 链路用；日常跑用 留学辅导/watchlist.yaml）
 manual:
   - 638ea9d7000000001f01d7f7   # 路觅留学生课程辅导
   - 63a95006000000002801986e   # 辅无忧留学课业辅导规划站

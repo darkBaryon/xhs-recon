@@ -18,21 +18,18 @@
 
 ## 快速开始
 
-**一键**：
-`./run.sh`（离线 demo）
-· `./run.sh real`（真实采集，自动确保采集浏览器就绪）
-· `./run.sh browser`（只起/查采集浏览器）。下面是各步骤的展开说明。
-
-**子命令（按需分段跑，共用同一份 config）**：
+**一键**（自动确保采集浏览器就绪；主题默认留学辅导，换赛道 `CONFIG=configs/<主题>/run.yaml ./run.sh sync`）：
 
 ```bash
-uv run python -m src.pipelines.cli search   --config configs/sample_mediacrawler.yaml  # 广角：关键词搜索+榜单（每周）
-uv run python -m src.pipelines.cli sync     --config configs/sample_mediacrawler.yaml  # 长焦：watchlist→creator→topic_feed（每周）
-uv run python -m src.pipelines.cli comments --config configs/sample_mediacrawler.yaml  # 深读：补采评论（做深度分析时）
-uv run python -m src.pipelines.cli research --config configs/sample_mediacrawler.yaml  # 全流程（= 旧入口）
+./run.sh            # 离线 fixture demo（无需登录/浏览器）
+./run.sh search     # 真实·广角：关键词搜索+榜单（每周）
+./run.sh sync       # 真实·长焦：watchlist→creator→topic_feed（每周）
+./run.sh comments   # 真实·深读：补采评论（做深度分析时）
+./run.sh real       # 真实·全流程（= research）
+./run.sh browser    # 只起/查采集浏览器
 ```
 
-推荐顺序 `search → sync → comments`：search 建当次运行目录，sync/comments **补全写回**同一目录（`latest` 始终指向这份逐步补全的研究快照）；sync 的 auto 名额读最近一次 search 的榜单（缺榜单则纯 manual）。旧入口 `python -m src.pipelines.run_research --config ...` 不变。
+推荐顺序 `search → sync → comments`：search 建当次运行目录，sync/comments **补全写回**同一目录（`latest` 始终指向这份逐步补全的研究快照）；sync 的 auto 名额读最近一次 search 的榜单（缺榜单则纯 manual）。等价直调：`uv run python -m src.pipelines.cli <子命令> --config configs/留学辅导/run.yaml`；旧入口 `python -m src.pipelines.run_research --config ...` 不变。
 
 ### 离线跑通（无需登录，随时可跑）
 
@@ -61,7 +58,7 @@ curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 **跑（完整管线，含 watchlist/creator/选题素材）：**
 
 ```bash
-uv run python -m src.pipelines.run_research --config configs/sample_mediacrawler.yaml
+./run.sh real    # 或直调：uv run python -m src.pipelines.cli research --config configs/留学辅导/run.yaml
 ```
 
 配置里的关注账号在 `watchlist.manual`（支持纯 user_id 或主页 URL，写错会显式报错）；`watchlist.auto_top_n` 从搜索榜单自动补足，总量上限 `max_total`（默认 10）；每账号取最新 `creator.notes_per_account` 篇（默认 10）。逐账号串行单并发拉取，跑一次算一次，无定时任务。
@@ -93,8 +90,8 @@ uv run python -m src.pipelines.run_research --config configs/sample_mediacrawler
 - `data/raw/<run>/` — MediaCrawler 原始 JSONL，按运行时间戳隔离（**评论 raw 含作者字段，仅本地留存，gitignore**）；
 - `data/exports/<时间戳>/` — 最终导出，按运行归档不覆盖；`exports/latest/` 软链指向最新（gitignore）；
 - `data/logs/` — 管线运行日志（gitignore），文件名形如 `run-<run_id>.log`；
-- 配置：`configs/sample.yaml`（fixture）/ `configs/sample_mediacrawler.yaml`（真实），键与缺省见文件内注释；
-- 领域资产外置：主配置可选 `keywords_file` / `watchlist_file` 引用独立资产文件（如 `configs/keywords-留学辅导.yaml` 词表、`configs/watchlist-留学辅导.yaml` 账号清单）——换赛道换资产文件，运行参数不动；与 inline 同键互斥（双源报错）。
+- 配置**按主题分目录**：`configs/<主题>/run.yaml`（运行配置）+ `keywords.yaml`（词表资产）+ `watchlist.yaml`（账号资产）——现有 `configs/留学辅导/`（日常）与 `configs/测试/`（最小链路验证：1 词 × 3 账号）；`configs/sample.yaml`（fixture demo）保持根位，供预飞/CI 引用；
+- 资产引用机制：`run.yaml` 里 `keywords_file` / `watchlist_file` 指向同主题资产文件；与 inline 同键互斥（双源报错）。新赛道 = 新建一个主题目录三件套。
 
 ## 日志
 

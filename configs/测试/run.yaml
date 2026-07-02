@@ -15,7 +15,7 @@ search:
   window_days: 30
 ranking:
   weights: { note_count: 10, keyword_hit: 5, interaction: 0.01, vertical: 10.0, activity: 1.0 }
-watchlist_file: configs/watchlist-测试.yaml
+watchlist_file: configs/测试/watchlist.yaml
 watchlist:
   auto_top_n: 0                 # 测试纯 manual，确定性
   max_total: 3
