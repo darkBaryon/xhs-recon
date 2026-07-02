@@ -70,6 +70,7 @@ def export_all(
     comment_top_k: int = 3,
     watchlist: list[WatchAccount] | None = None,
     creator_notes: list[Note] | None = None,
+    account_profiles: list[AccountRank] | None = None,
 ) -> dict[str, str]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -212,6 +213,27 @@ def export_all(
                     n.raw_path,
                 ]
                 for n in creator_notes
+            ],
+        )
+    if account_profiles is not None:
+        paths["account_profile"] = _write_csv(
+            out / "account_profile.csv",
+            [
+                "account_id",
+                "nickname",
+                "vertical_ratio",
+                "recent_note_count",
+                "profile_score",
+            ],
+            [
+                [
+                    r.account_id,
+                    r.nickname,
+                    f"{r.vertical_ratio:.4f}",
+                    r.recent_note_count,
+                    f"{r.profile_score:.2f}",
+                ]
+                for r in account_profiles
             ],
         )
     paths["report_input"] = _write_report(

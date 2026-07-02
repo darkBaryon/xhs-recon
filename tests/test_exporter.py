@@ -57,8 +57,10 @@ def test_export_all_writes_five_files(tmp_path):
     assert "comments" not in paths
     assert "watchlist" not in paths
     assert "creator_notes" not in paths
+    assert "account_profile" not in paths
     assert not (tmp_path / "watchlist.csv").exists()
     assert not (tmp_path / "creator_notes.csv").exists()
+    assert not (tmp_path / "account_profile.csv").exists()
 
     with open(tmp_path / "accounts.csv", encoding="utf-8") as f:
         rows = list(csv.reader(f))
@@ -145,3 +147,37 @@ def test_export_all_writes_watchlist_and_creator_notes_when_passed(tmp_path):
     ]
     assert creator_rows[1][0] == "N1"
     assert creator_rows[1][11] == "留学辅导"
+
+
+def test_export_all_writes_account_profile_when_passed(tmp_path):
+    accounts, notes, ranks, tns = _data()
+    profiles = [
+        AccountRank(
+            account_id="U1",
+            nickname="作者甲",
+            relevant_note_count=0,
+            keyword_hit_count=0,
+            avg_interaction=0.0,
+            account_score=0.0,
+            note_ids=[],
+            vertical_ratio=2 / 3,
+            recent_note_count=12,
+            profile_score=18.666,
+        )
+    ]
+
+    paths = export_all(
+        tmp_path,
+        accounts=accounts,
+        notes=notes,
+        ranks=ranks,
+        typical_notes=tns,
+        account_profiles=profiles,
+    )
+
+    with open(paths["account_profile"], encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert rows == [
+        ["account_id", "nickname", "vertical_ratio", "recent_note_count", "profile_score"],
+        ["U1", "作者甲", "0.6667", "12", "18.67"],
+    ]
