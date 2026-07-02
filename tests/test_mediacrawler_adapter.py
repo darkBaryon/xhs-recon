@@ -99,7 +99,7 @@ def test_search_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, monkeypat
         r = a.search("k", 1, 20, "2026-06-24T00:00:00Z")
     assert not r.ok and "exit 1" in r.error
     assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "boom"
-    assert "crawler exit 1" in caplog.text
+    assert "MediaCrawler 退出码 1" in caplog.text
 
 
 def test_search_empty_output_is_error(tmp_path, monkeypatch):
@@ -207,4 +207,4 @@ def test_fetch_comments_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, m
     assert r.comments == []
     assert "exit 1" in r.error
     assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "boom"
-    assert "crawler exit 1" in caplog.text
+    assert "MediaCrawler 退出码 1" in caplog.text

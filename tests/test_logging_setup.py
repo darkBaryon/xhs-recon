@@ -103,5 +103,5 @@ def test_log_result_routes_ok_and_error(caplog):
     # 成功降 DEBUG（阶段 INFO 行已含同等信息，避免控制台重复）；失败仍 WARN
     ok_records = [r for r in caplog.records if "search ok:" in r.message]
     assert ok_records and all(r.levelno == logging.DEBUG for r in ok_records)
-    assert "fetch_comments failed: boom" in caplog.text
+    assert "评论采集失败：boom" in caplog.text
     assert any(r.levelno == logging.WARNING for r in caplog.records)

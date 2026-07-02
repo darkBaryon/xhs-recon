@@ -33,14 +33,15 @@ def test_run_research_logs_stage_lines_and_keyword(tmp_path, monkeypatch, caplog
         run_research(str(cfg_path), verbose=True)
 
     text = caplog.text
-    assert "keywords expanded:" in text
-    assert "search kw=留学辅导 p1:" in text
-    assert "aggregate:" in text
-    assert "rank:" in text
-    assert "select typical:" in text
-    assert "comments:" in text
-    assert "export:" in text
-    assert any(r.levelno == logging.INFO and "kw=" in r.message for r in caplog.records)
+    assert "关键词扩展：" in text
+    assert "搜索「留学辅导」第 1 页：" in text
+    assert "聚合去重：" in text
+    assert "账号打分：" in text
+    assert "选出典型笔记：" in text
+    assert "评论：采到" in text
+    assert "导出" in text
+    # 关键词可 grep 性（B2 取舍：keyword 入消息体）
+    assert any(r.levelno == logging.INFO and "「留学辅导」" in r.message for r in caplog.records)
 
 
 def test_run_research_logs_search_error_as_warning(tmp_path, monkeypatch, caplog):
@@ -55,7 +56,8 @@ def test_run_research_logs_search_error_as_warning(tmp_path, monkeypatch, caplog
         run_research(str(cfg_path))
 
     assert any(
-        r.levelno == logging.WARNING and "search failed:" in r.message for r in caplog.records
+        r.levelno == logging.WARNING and "搜索" in r.message and "失败：" in r.message
+        for r in caplog.records
     )
 
 

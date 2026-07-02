@@ -174,7 +174,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             return self._err(keyword, page, collected_at, cmd, f"run failed: {e}")
         self._write_crawler_log(save_path, out)
         if rc != 0:
-            logger.warning("crawler exit %d, log at %s", rc, save_path / "mediacrawler.log")
+            logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
             return self._err(
                 keyword, page, collected_at, cmd, f"exit {rc}: {out[-300:]}", save_path
             )
@@ -223,7 +223,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             )
         self._write_crawler_log(save_path, out)
         if rc != 0:
-            logger.warning("crawler exit %d, log at %s", rc, save_path / "mediacrawler.log")
+            logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
             return self._err(
                 None,
                 None,

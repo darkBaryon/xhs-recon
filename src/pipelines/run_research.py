@@ -60,7 +60,7 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     )
 
     keywords = expand_keywords(config.get("keywords", []), config.get("synonyms"))
-    logger.info("keywords expanded: %d -> %s", len(keywords), keywords)
+    logger.info("关键词扩展：%d 个（%s）", len(keywords), " / ".join(keywords))
     search_cfg = config.get("search", {})
     pages = search_cfg.get("pages", 1)
     limit = search_cfg.get("limit", 20)
@@ -73,7 +73,7 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
             dt = perf_counter() - t0
             log_result(logger, result)
             logger.info(
-                "search kw=%s p%d: %d notes %d accounts in %.1fs",
+                "搜索「%s」第 %d 页：笔记 %d · 账号 %d · %.1fs",
                 kw,
                 page,
                 len(result.notes),
@@ -83,12 +83,12 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
             results.append(result)
 
     notes, accounts = aggregate(results)
-    logger.info("aggregate: %d notes %d accounts", len(notes), len(accounts))
+    logger.info("聚合去重：笔记 %d · 账号 %d", len(notes), len(accounts))
     ranks = rank_accounts(accounts, notes, config.get("ranking", {}).get("weights"))
-    logger.info("rank: %d accounts", len(ranks))
+    logger.info("账号打分：%d 个", len(ranks))
     top = config.get("selection", {}).get("top_notes_per_account", 2)
     typical = select_typical_notes(notes, top)
-    logger.info("select typical: %d notes", len(typical))
+    logger.info("选出典型笔记：%d 条", len(typical))
 
     comments_cfg = config.get("comments", {})
     comments = []
@@ -99,16 +99,16 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
             )
         except NotImplementedError:
             comment_result = None
-            logger.info("comments skipped: not implemented")
+            logger.info("评论：跳过（数据源不支持）")
         if comment_result and comment_result.ok:
             log_result(logger, comment_result)
             comments = comment_result.comments
-            logger.info("comments: %d", len(comments))
+            logger.info("评论：采到 %d 条", len(comments))
         elif comment_result:
             log_result(logger, comment_result)
-            logger.info("comments: 0")
+            logger.info("评论：采到 0 条")
     else:
-        logger.info("comments skipped: disabled")
+        logger.info("评论：跳过（未启用）")
 
     out_dir = config.get("export", {}).get("out_dir", "data/exports")
     paths = export_all(
@@ -120,7 +120,7 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
         comments=comments,
         comment_top_k=comments_cfg.get("report_top_k", 3),
     )
-    logger.info("export: %d files", len(paths))
+    logger.info("✓ 导出 %d 个文件 → %s", len(paths), out_dir)
     return paths
 
 

@@ -14,9 +14,27 @@ from pathlib import Path
 from src.models import FetchResult
 
 HANDLER_PREFIX = "xhsrecon."
-CONSOLE_FORMAT = "%(asctime)s %(levelname)-5s %(message)s"
 CONSOLE_DATEFMT = "%H:%M:%S"
 FILE_FORMAT = "%(asctime)s %(levelname)-7s %(name)s [%(provider)s %(run_id)s] %(message)s"
+
+# 评论采集等操作名 → 人话（log_result 失败行用）
+_OP_CN = {"search": "搜索", "fetch_comments": "评论采集"}
+
+
+class ConsoleFormatter(logging.Formatter):
+    """控制台人读格式：时分秒 + 消息；成功不带级别字样，WARNING 以上带醒目标记。"""
+
+    def __init__(self):
+        super().__init__("%(asctime)s %(mark)s%(message)s", datefmt=CONSOLE_DATEFMT)
+
+    def format(self, record: logging.LogRecord) -> str:
+        if record.levelno >= logging.ERROR:
+            record.mark = "✖ "
+        elif record.levelno >= logging.WARNING:
+            record.mark = "⚠ "
+        else:
+            record.mark = ""
+        return super().format(record)
 
 
 class RunContextFilter(logging.Filter):
@@ -62,7 +80,7 @@ def configure_logging(cfg: dict | None, *, verbose: bool, run_id: str, provider:
     console = logging.StreamHandler()
     console.set_name(f"{HANDLER_PREFIX}console")
     console.setLevel(logging.DEBUG if verbose else _level(cfg.get("level", "info")))
-    console.setFormatter(logging.Formatter(CONSOLE_FORMAT, datefmt=CONSOLE_DATEFMT))
+    console.setFormatter(ConsoleFormatter())
     console.addFilter(context_filter)
     root.addHandler(console)
 
@@ -83,7 +101,7 @@ def configure_logging(cfg: dict | None, *, verbose: bool, run_id: str, provider:
             root.addHandler(file_handler)
 
     # 头行：控制台短格式下的 run 上下文交代（文件里每行本就带 [provider run_id]）
-    logging.getLogger(__name__).info("run %s provider=%s", run_id.split(".")[0], provider)
+    logging.getLogger(__name__).info("▶ 开始运行 · 数据源 %s", provider)
 
 
 def log_result(logger: logging.Logger, fr: FetchResult) -> None:
@@ -97,4 +115,6 @@ def log_result(logger: logging.Logger, fr: FetchResult) -> None:
             len(fr.comments),
         )
         return
-    logger.warning("%s failed: %s", fr.operation, fr.error)
+    op = _OP_CN.get(fr.operation, fr.operation)
+    kw = f"「{fr.keyword}」" if fr.keyword else ""
+    logger.warning("%s%s失败：%s（管线继续）", op, kw, fr.error)
