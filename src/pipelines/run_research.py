@@ -10,6 +10,7 @@ from time import perf_counter
 
 import typer
 import yaml
+from pydantic import BaseModel
 
 from src.adapters.fixture_adapter import FixtureAdapter
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
@@ -20,9 +21,9 @@ from src.core.exporter import export_all
 from src.core.keyword_expander import expand_keywords
 from src.core.note_selector import select_typical_notes
 from src.core.ports import ResearchAdapter
-from src.core.time_window import filter_notes
+from src.core.time_window import WindowFilterStats, filter_notes
 from src.core.watchlist import build_watchlist
-from src.models import Account, FetchResult, WatchAccount
+from src.models import Account, AccountRank, Comment, FetchResult, Note, TypicalNote, WatchAccount
 from src.pipelines.logging_setup import _compact_run_id, configure_logging, log_result
 
 app = typer.Typer(add_completion=False)
@@ -136,22 +137,20 @@ def _resolve_config_refs(config: dict) -> dict:
     return config
 
 
-def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
-    config = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
-    try:
-        config = _resolve_config_refs(config)
-    except ValueError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(1) from e
-    collected_at = _now_iso()
-    adapter = _build_adapter(config)
-    configure_logging(
-        config.get("logging", {}),
-        verbose=verbose,
-        run_id=collected_at,
-        provider=adapter.provider_name,
-    )
+class SyncArtifacts(BaseModel):
+    """watchlist 同步段产物（组装层私有载体，不进 models.py）。"""
 
+    watchlist: list[WatchAccount] | None = None
+    creator_notes: list[Note] | None = None
+    account_profiles: list[AccountRank] | None = None
+    topic_feed: list[Note] | None = None
+    topic_feed_stats: WindowFilterStats | None = None
+
+
+def _search_stage(
+    config: dict, adapter: ResearchAdapter, collected_at: str
+) -> tuple[list[Note], list[Account], list[AccountRank]]:
+    """搜索段：关键词扩展 → 逐词搜索 → 时间窗过滤 → 聚合去重 → 账号打分。"""
     keywords = expand_keywords(config.get("keywords", []), config.get("synonyms"))
     logger.info("关键词扩展：%d 个（%s）", len(keywords), " / ".join(keywords))
     search_cfg = config.get("search", {})
@@ -179,81 +178,88 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     results = _apply_time_window(results, window_days, collected_at)
     notes, accounts = aggregate(results)
     logger.info("聚合去重：笔记 %d · 账号 %d", len(notes), len(accounts))
-    ranking_weights = config.get("ranking", {}).get("weights")
-    ranks = rank_accounts(accounts, notes, ranking_weights)
+    ranks = rank_accounts(accounts, notes, config.get("ranking", {}).get("weights"))
     logger.info("账号打分：%d 个", len(ranks))
+    return notes, accounts, ranks
 
-    watchlist = None
-    creator_notes = None
-    account_profiles = None
-    topic_feed_notes = None
-    topic_feed_stats = None
+
+def _sync_stage(
+    config: dict, adapter: ResearchAdapter, collected_at: str, ranks: list[AccountRank]
+) -> SyncArtifacts:
+    """watchlist 同步段：合成 → creator 拉取 → 专业度分项 → topic_feed 窗过滤。"""
     watchlist_cfg = config.get("watchlist")
-    if watchlist_cfg is not None:
-        try:
-            manual_ids = [normalize_creator_ref(ref) for ref in watchlist_cfg.get("manual", [])]
-        except ValueError as e:
-            typer.echo(str(e), err=True)
-            raise typer.Exit(1) from e
+    if watchlist_cfg is None:
+        return SyncArtifacts()
 
-        auto_top_n = watchlist_cfg.get("auto_top_n", 0)
-        max_total = watchlist_cfg.get("max_total", 10)
-        watchlist = build_watchlist(ranks, manual_ids, auto_top_n, max_total)
-        auto_count = sum(1 for account in watchlist if account.source == "auto")
-        logger.info(
-            "watchlist：manual %d · auto %d/%d · total %d",
-            len(manual_ids),
-            auto_count,
-            auto_top_n,
-            len(watchlist),
-        )
+    try:
+        manual_ids = [normalize_creator_ref(ref) for ref in watchlist_cfg.get("manual", [])]
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
 
-        creator_notes = []
-        if watchlist:
-            creator_cfg = config.get("creator", {})
-            try:
-                creator_result = adapter.fetch_creator_notes(
-                    [account.account_id for account in watchlist],
-                    creator_cfg.get("notes_per_account", 10),
-                    collected_at,
-                )
-            except NotImplementedError:
-                logger.warning("创作者笔记采集：跳过（数据源不支持）")
-            else:
-                log_result(logger, creator_result)
-                creator_notes = creator_result.notes
-                watchlist = _backfill_watchlist_nicknames(watchlist, creator_result.accounts)
-                logger.info("创作者笔记：采到 %d 条", len(creator_notes))
-        else:
-            logger.info("watchlist：为空，跳过创作者笔记采集")
-        account_profiles = profile_accounts(
-            watchlist,
-            creator_notes,
-            keywords,
-            window_days,
-            collected_at,
-            ranking_weights,
-        )
-        topic_feed_notes, topic_feed_stats = filter_notes(creator_notes, window_days, collected_at)
-        logger.info(
-            "topic_feed：kept=%d out_of_window=%d missing_time=%d",
-            topic_feed_stats.kept,
-            topic_feed_stats.out_of_window,
-            topic_feed_stats.missing_time,
-        )
-
-    selection_cfg = config.get("selection", {})
-    top = selection_cfg.get("top_notes_per_account", 2)
-    typical = select_typical_notes(
-        notes,
-        top,
-        half_life_days=selection_cfg.get("half_life_days", 0),
-        now_iso=collected_at,
+    auto_top_n = watchlist_cfg.get("auto_top_n", 0)
+    max_total = watchlist_cfg.get("max_total", 10)
+    watchlist = build_watchlist(ranks, manual_ids, auto_top_n, max_total)
+    auto_count = sum(1 for account in watchlist if account.source == "auto")
+    logger.info(
+        "watchlist：manual %d · auto %d/%d · total %d",
+        len(manual_ids),
+        auto_count,
+        auto_top_n,
+        len(watchlist),
     )
-    logger.info("选出典型笔记：%d 条", len(typical))
 
+    creator_notes: list[Note] = []
+    if watchlist:
+        creator_cfg = config.get("creator", {})
+        try:
+            creator_result = adapter.fetch_creator_notes(
+                [account.account_id for account in watchlist],
+                creator_cfg.get("notes_per_account", 10),
+                collected_at,
+            )
+        except NotImplementedError:
+            logger.warning("创作者笔记采集：跳过（数据源不支持）")
+        else:
+            log_result(logger, creator_result)
+            creator_notes = creator_result.notes
+            watchlist = _backfill_watchlist_nicknames(watchlist, creator_result.accounts)
+            logger.info("创作者笔记：采到 %d 条", len(creator_notes))
+    else:
+        logger.info("watchlist：为空，跳过创作者笔记采集")
+
+    keywords = expand_keywords(config.get("keywords", []), config.get("synonyms"))
+    window_days = config.get("search", {}).get("window_days", 0)
+    account_profiles = profile_accounts(
+        watchlist,
+        creator_notes,
+        keywords,
+        window_days,
+        collected_at,
+        config.get("ranking", {}).get("weights"),
+    )
+    topic_feed_notes, topic_feed_stats = filter_notes(creator_notes, window_days, collected_at)
+    logger.info(
+        "topic_feed：kept=%d out_of_window=%d missing_time=%d",
+        topic_feed_stats.kept,
+        topic_feed_stats.out_of_window,
+        topic_feed_stats.missing_time,
+    )
+    return SyncArtifacts(
+        watchlist=watchlist,
+        creator_notes=creator_notes,
+        account_profiles=account_profiles,
+        topic_feed=topic_feed_notes,
+        topic_feed_stats=topic_feed_stats,
+    )
+
+
+def _comments_stage(
+    config: dict, adapter: ResearchAdapter, typical: list[TypicalNote], collected_at: str
+) -> list[Comment]:
+    """评论段：对典型笔记批量采一级评论（可关）。"""
     comments_cfg = config.get("comments", {})
-    comments = []
+    comments: list[Comment] = []
     if comments_cfg.get("enabled"):
         # 进行时提示：评论段是单个子进程调用，期间无逐条输出，预告避免误判卡死
         logger.info("评论：开始采集 %d 条典型笔记的评论（单并发批量，约需数分钟）", len(typical))
@@ -273,6 +279,39 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
             logger.info("评论：采到 0 条")
     else:
         logger.info("评论：跳过（未启用）")
+    return comments
+
+
+def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
+    config = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    try:
+        config = _resolve_config_refs(config)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
+    collected_at = _now_iso()
+    adapter = _build_adapter(config)
+    configure_logging(
+        config.get("logging", {}),
+        verbose=verbose,
+        run_id=collected_at,
+        provider=adapter.provider_name,
+    )
+
+    notes, accounts, ranks = _search_stage(config, adapter, collected_at)
+    sync = _sync_stage(config, adapter, collected_at, ranks)
+
+    selection_cfg = config.get("selection", {})
+    top = selection_cfg.get("top_notes_per_account", 2)
+    typical = select_typical_notes(
+        notes,
+        top,
+        half_life_days=selection_cfg.get("half_life_days", 0),
+        now_iso=collected_at,
+    )
+    logger.info("选出典型笔记：%d 条", len(typical))
+
+    comments = _comments_stage(config, adapter, typical, collected_at)
 
     # 按运行归档：每次导出独立时间戳目录（与 run 日志同一时间戳，可互相对上），不覆盖历史
     out_base = Path(config.get("export", {}).get("out_dir", "data/exports"))
@@ -284,13 +323,13 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
         ranks=ranks,
         typical_notes=typical,
         comments=comments,
-        comment_top_k=comments_cfg.get("report_top_k", 3),
-        watchlist=watchlist,
-        creator_notes=creator_notes,
-        account_profiles=account_profiles,
-        topic_feed=topic_feed_notes,
-        topic_feed_stats=topic_feed_stats,
-        topic_feed_window_days=window_days,
+        comment_top_k=config.get("comments", {}).get("report_top_k", 3),
+        watchlist=sync.watchlist,
+        creator_notes=sync.creator_notes,
+        account_profiles=sync.account_profiles,
+        topic_feed=sync.topic_feed,
+        topic_feed_stats=sync.topic_feed_stats,
+        topic_feed_window_days=config.get("search", {}).get("window_days", 0),
     )
     _update_latest_link(out_base, run_dir)
     logger.info("✓ 导出 %d 个文件 → %s", len(paths), run_dir)
