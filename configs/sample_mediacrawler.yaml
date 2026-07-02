@@ -11,6 +11,8 @@ synonyms:
 search:
   pages: 1
   limit: 20
+  sort: time_descending
+  window_days: 30
 ranking:
   weights:
     note_count: 10
@@ -18,6 +20,7 @@ ranking:
     interaction: 0.01
 selection:
   top_notes_per_account: 2
+  half_life_days: 14
 comments:
   enabled: true
   limit: 10
