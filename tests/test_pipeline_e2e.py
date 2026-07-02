@@ -1,5 +1,7 @@
 import csv
+import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -123,6 +125,9 @@ def test_pipeline_without_watchlist_does_not_call_fetch_creator_notes(tmp_path, 
 
     assert "watchlist" not in paths
     assert "creator_notes" not in paths
+    assert "account_profile" not in paths
+    assert "topic_feed" not in paths
+    assert "topic_feed_jsonl" not in paths
 
 
 def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
@@ -157,6 +162,9 @@ def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
         "report_input",
         "watchlist",
         "creator_notes",
+        "account_profile",
+        "topic_feed",
+        "topic_feed_jsonl",
     }
     for key in ["accounts", "notes", "account_rank", "typical_notes", "report_input"]:
         assert Path(watch_paths[key]).read_bytes() == Path(base_paths[key]).read_bytes()
@@ -175,6 +183,15 @@ def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
         "6a4661a0000000001702c88e",
     ]
     assert all(row["source_keywords"] == "" for row in creator_rows)
+
+    profile_rows = _csv_rows(Path(watch_paths["account_profile"]))
+    assert list(profile_rows[0]) == [
+        "account_id",
+        "nickname",
+        "vertical_ratio",
+        "recent_note_count",
+        "profile_score",
+    ]
 
 
 def test_pipeline_invalid_manual_ref_fails_fast(tmp_path, monkeypatch, capsys):
@@ -267,6 +284,73 @@ def test_pipeline_window_filters_before_aggregate(tmp_path, monkeypatch, capsys)
     account_rows = _csv_rows(Path(paths["accounts"]))
     assert [row["note_id"] for row in note_rows] == ["6a3694f10000000017029511"]
     assert [row["account_id"] for row in account_rows] == ["66dd617b000000001d0215a6"]
+
+
+def test_pipeline_topic_feed_keeps_only_window_notes_and_counts_stats(
+    tmp_path, monkeypatch, caplog
+):
+    now_iso = "2026-07-03T00:00:00+00:00"
+    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: now_iso)
+    cfg = _cfg(tmp_path)
+    cfg["search"]["window_days"] = 30
+    cfg["creator_fixture_path"] = "tests/fixtures/creator_contents_sample.jsonl"
+    cfg["watchlist"] = {
+        "auto_top_n": 0,
+        "manual": [
+            "601d0481000000000101cc46",
+            "603d0481000000000101cc48",
+        ],
+        "max_total": 5,
+    }
+    cfg["creator"] = {"notes_per_account": 3}
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+
+    with caplog.at_level("INFO"):
+        paths = run_research(str(cfg_path))
+
+    creator_rows = _csv_rows(Path(paths["creator_notes"]))
+    json_rows = [
+        json.loads(line)
+        for line in Path(paths["topic_feed_jsonl"]).read_text(encoding="utf-8").splitlines()
+    ]
+    assert [row["note_id"] for row in json_rows] == [
+        "6a4661cd0000000017029d86",
+        "6a4661a0000000001702c88e",
+    ]
+
+    now = datetime.fromisoformat(now_iso)
+    for row in json_rows:
+        published_at = datetime.fromisoformat(row["published_at"])
+        age_days = (now - published_at).total_seconds() / 86400
+        assert 0 <= age_days <= 30
+
+    feed_head = Path(paths["topic_feed"]).read_text(encoding="utf-8").splitlines()[0]
+    assert feed_head == "窗口 30 天 · 入 feed 2 条 · 出窗 1 · 缺时间 0 · 账号 1"
+    counts = {
+        key: int(value) for key, value in re.findall(r"(入 feed|出窗|缺时间) (\d+)", feed_head)
+    }
+    assert counts == {"入 feed": 2, "出窗": 1, "缺时间": 0}
+    assert counts["入 feed"] + counts["出窗"] + counts["缺时间"] == len(creator_rows)
+    assert "topic_feed：kept=2 out_of_window=1 missing_time=0" in caplog.text
+
+    profile_rows = _csv_rows(Path(paths["account_profile"]))
+    assert profile_rows == [
+        {
+            "account_id": "601d0481000000000101cc46",
+            "nickname": "陈皮糖",
+            "vertical_ratio": "1.0000",
+            "recent_note_count": "2",
+            "profile_score": "12.00",
+        },
+        {
+            "account_id": "603d0481000000000101cc48",
+            "nickname": "出窗样本C",
+            "vertical_ratio": "1.0000",
+            "recent_note_count": "0",
+            "profile_score": "10.00",
+        },
+    ]
 
 
 def test_pipeline_end_to_end_with_comments(tmp_path, monkeypatch):
