@@ -169,6 +169,18 @@ def test_cli_comments_without_run_exits(tmp_path):
     assert runner.invoke(app, ["comments", "--config", cfg_path]).exit_code == 1
 
 
+def test_cli_comments_respects_enabled_flag(tmp_path):
+    """现行为回归锁（实施偏差4，待用户裁决）：enabled=false 时显式 cli comments 也不采集。"""
+    out = tmp_path / "out"
+    cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out, comments=False))
+    assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
+
+    result = runner.invoke(app, ["comments", "--config", cfg_path])
+    assert result.exit_code == 0
+    names = set(_snapshot(_run_dir(out)))
+    assert "comments.csv" not in names  # 开关拦下，未采集
+
+
 def test_full_chain_search_sync_comments(tmp_path):
     """推荐链路端到端：三命令顺序执行全通，产物聚在同一运行目录。"""
     out = tmp_path / "out"

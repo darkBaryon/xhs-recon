@@ -85,3 +85,12 @@ def test_resolve_latest_returns_real_dir(tmp_path):
     run.mkdir()
     (tmp_path / "latest").symlink_to(run.name, target_is_directory=True)
     assert resolve_latest_run_dir(tmp_path) == run.resolve()
+
+
+def test_resolve_latest_pointing_to_file_raises(tmp_path):
+    # latest 存在但指向的是文件而非目录（代码评审 #1 建议2：非目录分支补覆盖）
+    target = tmp_path / "not-a-dir.txt"
+    target.write_text("x", encoding="utf-8")
+    (tmp_path / "latest").symlink_to(target.name)
+    with pytest.raises(ValueError, match="有效运行目录"):
+        resolve_latest_run_dir(tmp_path)
