@@ -1,0 +1,35 @@
+# 专业账号追踪 期2 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 workbench/tools/preflight.py --config workbench/cases/专业账号追踪/期2/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+# 注：本期 MediaCrawler fork 零改动；真实 creator 拉取属 Gate 2 手动验收，不进本表（见方案 §6）
+
+必过命令:                  # 退出码须 0
+  - { name: lint,         run: "uv run ruff check ." }
+  - { name: format,       run: "uv run ruff format --check ." }
+  - { name: tests,        run: "uv run pytest -q" }
+  - { name: demo-fixture, run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+  - { name: no-touch,     run: "git diff --quiet e345432 -- src/core/aggregator.py src/core/account_ranker.py" }   # 方案 §3 非目标的机械兜底（parsers 本期合法改动，不进本项）
+                           # 注：实施前若 main HEAD 已从 e345432 漂移，须先重跑 git log -1 e345432 确认起点有效、并核对漂移未涉本项路径（评审 #1 建议3，沿期1 已知项口径）
+
+必存产物:                  # demo（fixture，sample.yaml 开 watchlist 段）跑完后须存在
+  - data/exports/latest/accounts.csv          # 旧 5 文件契约不变（导出归档线后走 latest 软链）
+  - data/exports/latest/notes.csv
+  - data/exports/latest/account_rank.csv
+  - data/exports/latest/typical_notes.csv
+  - data/exports/latest/report_input.md
+  - data/exports/latest/watchlist.csv         # 本期新增
+  - data/exports/latest/creator_notes.csv     # 本期新增
+
+必含符号:                  # 本期新增接口必须落地（grep 命中 ≥1）
+  - { grep: "class WatchAccount",          in: "src/models.py" }
+  - { grep: "def fetch_creator_notes",     in: "src/core/ports.py" }
+  - { grep: "def build_watchlist",         in: "src/core/watchlist.py" }
+  - { grep: "def normalize_creator_ref",   in: "src/adapters/parsers.py" }
+  - { grep: "creator_notes.csv",           in: "src/core/exporter.py" }
+  - { grep: "fetch_creator_notes",         in: "src/adapters/mediacrawler_adapter.py" }
+  - { grep: "creator_path",                in: "src/adapters/fixture_adapter.py" }
+  - { grep: "watchlist",                   in: "src/pipelines/run_research.py" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",     in: "src/core" }        # 铁律：core 平台无关（归一化在 adapters.parsers）
+  - { grep: "print(",  in: "src" }             # 调试残留
