@@ -1,0 +1,29 @@
+# 专业账号追踪 期1 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 tools/preflight.py --config cases/专业账号追踪/期1/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+# 注：MediaCrawler fork 的 --sort_type 在其自己仓，不进本表（手动 --help 核对 + 真实跑覆盖，见方案 §6）
+
+必过命令:                  # 退出码须 0
+  - { name: lint,         run: "uv run ruff check ." }
+  - { name: format,       run: "uv run ruff format --check ." }
+  - { name: tests,        run: "uv run pytest -q" }
+  - { name: demo-fixture, run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+  - { name: no-touch,     run: "git diff --quiet f727dc3 -- src/core/aggregator.py src/core/account_ranker.py src/adapters/parsers.py" }   # 方案 §3 非目标的机械兜底
+
+必存产物:                  # demo（fixture，全 0 默认）跑完后须存在（旧契约不变）
+  - data/exports/accounts.csv
+  - data/exports/notes.csv
+  - data/exports/account_rank.csv
+  - data/exports/typical_notes.csv
+  - data/exports/report_input.md
+
+必含符号:                  # 本期新增接口必须落地（grep 命中 ≥1）
+  - { grep: "def filter_notes",      in: "src/core/time_window.py" }
+  - { grep: "class WindowFilterStats", in: "src/core/time_window.py" }
+  - { grep: "sort_type",             in: "src/adapters/mediacrawler_adapter.py" }
+  - { grep: "half_life_days",        in: "src/core/note_selector.py" }
+  - { grep: "window_days",           in: "src/pipelines/run_research.py" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",     in: "src/core" }        # 铁律：core 平台无关
+  - { grep: "print(",  in: "src" }             # 调试残留（统计输出走 typer.echo）
