@@ -93,6 +93,8 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     comments_cfg = config.get("comments", {})
     comments = []
     if comments_cfg.get("enabled"):
+        # 进行时提示：评论段是单个子进程调用，期间无逐条输出，预告避免误判卡死
+        logger.info("评论：开始采集 %d 条典型笔记的评论（单并发批量，约需数分钟）", len(typical))
         try:
             comment_result = adapter.fetch_comments(
                 typical, comments_cfg.get("limit", 10), collected_at
