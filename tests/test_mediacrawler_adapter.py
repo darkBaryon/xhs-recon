@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from pathlib import Path
 
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
@@ -55,6 +56,40 @@ def test_search_success_reads_and_parses(tmp_path, monkeypatch):
     assert r.ok
     assert len(r.notes) == 5
     assert r.notes[0].like_count == 10000  # 复用期1 parsers，"1万"→10000
+
+
+def test_search_replacement_character_output_still_parses(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    sample = Path(SAMPLE).read_text(encoding="utf-8")
+
+    def fake_run(cmd):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_contents_2026-06-24.jsonl").write_text(sample, encoding="utf-8")
+        return 0, "stderr already decoded with replacement \ufffd"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.search("留学辅导", 1, 20, "2026-06-24T00:00:00Z")
+
+    assert r.ok
+    assert len(r.notes) == 5
+
+
+def test_run_crawler_replaces_invalid_output_bytes(tmp_path):
+    script = tmp_path / "bad_bytes.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stdout.buffer.write(b'ok')\n"
+        "sys.stderr.buffer.write(b'bad\\xe8bytes')\n",
+        encoding="utf-8",
+    )
+    a = MediaCrawlerAdapter(str(tmp_path), tmp_path, launcher=[sys.executable])
+
+    rc, out = a._run_crawler([sys.executable, str(script)])
+
+    assert rc == 0
+    assert "bad\ufffdbytes" in out
 
 
 def test_search_nonzero_exit_is_error(tmp_path, monkeypatch):

@@ -118,6 +118,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             cwd=self.mediacrawler_dir,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=self.timeout,
         )
         return p.returncode, (p.stdout + p.stderr)
@@ -159,7 +160,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         cmd = self._build_command(keyword, page, limit, save_path)
         try:
             rc, out = self._run_crawler(cmd)
-        except (OSError, subprocess.SubprocessError) as e:
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
             return self._err(keyword, page, collected_at, cmd, f"run failed: {e}")
         if rc != 0:
             return self._err(keyword, page, collected_at, cmd, f"exit {rc}: {out[-300:]}")
@@ -196,7 +197,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         cmd = self._build_comments_command(urls, limit, save_path)
         try:
             rc, out = self._run_crawler(cmd)
-        except (OSError, subprocess.SubprocessError) as e:
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
             return self._err(
                 None,
                 None,
