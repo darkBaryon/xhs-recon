@@ -2,16 +2,17 @@
 
 from pathlib import Path
 
-from src.adapters.parsers import parse_jsonl_lines
+from src.adapters.parsers import parse_comments_jsonl_lines, parse_jsonl_lines
 from src.core.ports import ResearchAdapter
-from src.models import FetchResult
+from src.models import FetchResult, TypicalNote
 
 
 class FixtureAdapter(ResearchAdapter):
     provider_name = "fixture"
 
-    def __init__(self, fixture_path: str):
+    def __init__(self, fixture_path: str, comments_path: str | None = None):
         self._path = Path(fixture_path)
+        self._comments_path = Path(comments_path) if comments_path else None
 
     def search(self, keyword: str, page: int, limit: int, collected_at: str) -> FetchResult:
         try:
@@ -46,5 +47,31 @@ class FixtureAdapter(ResearchAdapter):
             notes=notes,
             accounts=accounts,
             raw_path=str(self._path),
+            raw_text=text,
+        )
+
+    def fetch_comments(
+        self, notes: list[TypicalNote], limit: int, collected_at: str
+    ) -> FetchResult:
+        if self._comments_path is None:
+            raise NotImplementedError
+        try:
+            text = self._comments_path.read_text(encoding="utf-8")
+        except OSError as e:
+            return FetchResult(
+                provider=self.provider_name,
+                operation="fetch_comments",
+                collected_at=collected_at,
+                error=f"read comments fixture failed: {e}",
+            )
+        comments = parse_comments_jsonl_lines(text.splitlines(), collected_at=collected_at)
+        if limit:
+            comments = comments[:limit]
+        return FetchResult(
+            provider=self.provider_name,
+            operation="fetch_comments",
+            collected_at=collected_at,
+            comments=comments,
+            raw_path=str(self._comments_path),
             raw_text=text,
         )
