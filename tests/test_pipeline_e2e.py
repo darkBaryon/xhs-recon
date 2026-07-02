@@ -45,12 +45,14 @@ def test_pipeline_end_to_end(tmp_path):
         assert Path(paths[key]).exists()
     assert "comments" not in paths
 
-    with open(tmp_path / "accounts.csv", encoding="utf-8") as f:
+    with open(paths["accounts"], encoding="utf-8") as f:
         rows = list(csv.reader(f))
     assert len(rows) - 1 == 5  # sample 5 个不同作者 → 去重后 5 个账号
 
-    md = (tmp_path / "report_input.md").read_text(encoding="utf-8")
+    md = Path(paths["report_input"]).read_text(encoding="utf-8")
     assert md.strip() != ""
+    # 按运行归档：导出落在 out_dir 下的时间戳子目录
+    assert Path(paths["report_input"]).parent.parent == tmp_path
 
 
 def test_pipeline_window_filters_before_aggregate(tmp_path, monkeypatch, capsys):
@@ -60,11 +62,11 @@ def test_pipeline_window_filters_before_aggregate(tmp_path, monkeypatch, capsys)
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
 
-    run_research(str(cfg_path))
+    paths = run_research(str(cfg_path))
 
     assert capsys.readouterr().out == ("time_window: kept=1 out_of_window=4 missing_time=0\n")
-    note_rows = _csv_rows(tmp_path / "notes.csv")
-    account_rows = _csv_rows(tmp_path / "accounts.csv")
+    note_rows = _csv_rows(Path(paths["notes"]))
+    account_rows = _csv_rows(Path(paths["accounts"]))
     assert [row["note_id"] for row in note_rows] == ["6a3694f10000000017029511"]
     assert [row["account_id"] for row in account_rows] == ["66dd617b000000001d0215a6"]
 
@@ -91,16 +93,17 @@ def test_pipeline_end_to_end_with_comments(tmp_path, monkeypatch):
         "comments",
         "report_input",
     }
-    with open(tmp_path / "comments.csv", encoding="utf-8") as f:
+    with open(paths["comments"], encoding="utf-8") as f:
         rows = list(csv.reader(f))
     assert rows[0] == ["body", "note_id", "like_count", "collected_at"]
     assert rows[1][0].startswith("这个角度")
     assert rows[1][2] == "12000"
 
-    md = (tmp_path / "report_input.md").read_text(encoding="utf-8")
+    md = Path(paths["report_input"]).read_text(encoding="utf-8")
     assert "评论 12000赞：这个角度很有帮助" in md
+    run_dir = Path(paths["report_input"]).parent
     exported_text = "\n".join(
-        p.read_text(encoding="utf-8") for p in tmp_path.iterdir() if p.is_file()
+        p.read_text(encoding="utf-8") for p in run_dir.iterdir() if p.is_file()
     )
     assert "user-secret" not in exported_text
     assert "不应落盘" not in exported_text
