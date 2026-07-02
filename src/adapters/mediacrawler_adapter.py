@@ -118,6 +118,37 @@ class MediaCrawlerAdapter(ResearchAdapter):
             cmd += ["--cookies", self.cookies]
         return cmd
 
+    def _build_creator_command(self, account_id: str, limit: int, save_path: Path) -> list[str]:
+        cmd = [
+            *self.launcher,
+            "main.py",
+            "--platform",
+            "xhs",
+            "--type",
+            "creator",
+            "--creator_id",
+            account_id,
+            "--lt",
+            self.login_type,
+            "--save_data_option",
+            "jsonl",
+            "--save_data_path",
+            str(save_path),
+            "--enable_ip_proxy",
+            "no",
+            "--get_comment",
+            "no",
+            "--get_sub_comment",
+            "no",
+            "--max_concurrency_num",
+            "1",
+            "--crawler_max_notes_count",
+            str(limit or self.max_notes),
+        ]
+        if self.cookies:
+            cmd += ["--cookies", self.cookies]
+        return cmd
+
     def _run_crawler(self, cmd: list[str]) -> tuple[int, str]:
         """实跑 MediaCrawler；单测注入此点以避免真实采集。"""
         p = subprocess.run(
@@ -147,6 +178,17 @@ class MediaCrawlerAdapter(ResearchAdapter):
         for f in files:
             lines.extend(f.read_text(encoding="utf-8").splitlines())
         return parse_comments_jsonl_lines(lines, collected_at=collected_at)
+
+    def _read_creator_results(
+        self, save_path: Path, collected_at: str
+    ) -> tuple[list[Note], list[Account]]:
+        files = sorted(Path(save_path).glob("xhs/jsonl/creator_contents_*.jsonl"))
+        lines: list[str] = []
+        for f in files:
+            lines.extend(f.read_text(encoding="utf-8").splitlines())
+        return parse_jsonl_lines(
+            lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
+        )
 
     def _write_crawler_log(self, save_path: Path, text: str) -> None:
         try:
@@ -256,4 +298,49 @@ class MediaCrawlerAdapter(ResearchAdapter):
             comments=comments,
             raw_path=str(save_path),
             command=" ".join(cmd),
+        )
+
+    def fetch_creator_notes(
+        self, account_ids: list[str], limit: int, collected_at: str
+    ) -> FetchResult:
+        save_root = self._save_path(collected_at) / "creator"
+        commands: list[str] = []
+        failed_ids: list[str] = []
+        notes: list[Note] = []
+        accounts: list[Account] = []
+
+        for account_id in account_ids:
+            save_path = save_root / account_id
+            cmd = self._build_creator_command(account_id, limit, save_path)
+            commands.append(" ".join(cmd))
+            try:
+                rc, out = self._run_crawler(cmd)
+            except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+                failed_ids.append(account_id)
+                self._write_crawler_log(save_path, f"run failed: {e}")
+                continue
+            self._write_crawler_log(save_path, out)
+            if rc != 0:
+                logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
+                failed_ids.append(account_id)
+                continue
+            try:
+                account_notes, account_rows = self._read_creator_results(save_path, collected_at)
+            except (OSError, ValueError) as e:
+                failed_ids.append(account_id)
+                self._write_crawler_log(save_path, f"read creator failed: {e}")
+                continue
+            notes.extend(account_notes)
+            accounts.extend(account_rows)
+
+        error = f"creator fetch failed: {','.join(failed_ids)}" if failed_ids else None
+        return FetchResult(
+            provider=self.provider_name,
+            operation="creator_notes",
+            collected_at=collected_at,
+            notes=notes,
+            accounts=accounts,
+            raw_path=str(save_root),
+            error=error,
+            command=" && ".join(commands),
         )

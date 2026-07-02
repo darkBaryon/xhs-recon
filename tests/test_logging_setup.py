@@ -91,7 +91,13 @@ def test_run_context_fields_written_to_file(tmp_path):
 
 def test_log_result_routes_ok_and_error(caplog):
     logger = logging.getLogger("tests.log_result")
-    ok = FetchResult(provider="fixture", operation="search", collected_at="2026", notes=[])
+    ok = FetchResult(
+        provider="fixture",
+        operation="search",
+        collected_at="2026",
+        notes=[],
+        command="run search",
+    )
     bad = FetchResult(
         provider="fixture", operation="fetch_comments", collected_at="2026", error="boom"
     )
@@ -103,5 +109,6 @@ def test_log_result_routes_ok_and_error(caplog):
     # 成功降 DEBUG（阶段 INFO 行已含同等信息，避免控制台重复）；失败仍 WARN
     ok_records = [r for r in caplog.records if "search ok:" in r.message]
     assert ok_records and all(r.levelno == logging.DEBUG for r in ok_records)
+    assert "search command: run search" in caplog.text
     assert "评论采集失败：boom" in caplog.text
     assert any(r.levelno == logging.WARNING for r in caplog.records)
