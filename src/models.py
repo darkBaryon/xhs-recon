@@ -65,6 +65,7 @@ class FetchResult(BaseModel):
     note_id: str | None = None
     notes: list[Note] = []
     accounts: list[Account] = []
+    comments: list[Comment] = []
     raw_path: str | None = None
     raw_text: str | None = None
     error: str | None = None
