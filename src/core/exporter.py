@@ -4,8 +4,10 @@
 """
 
 import csv
+import json
 from pathlib import Path
 
+from src.core.time_window import WindowFilterStats
 from src.models import Account, AccountRank, Comment, Note, TypicalNote, WatchAccount
 
 PIPE = "|"
@@ -59,6 +61,91 @@ def _write_report(
     return str(path)
 
 
+def _watch_meta(watchlist: list[WatchAccount] | None) -> dict[str, WatchAccount]:
+    return {account.account_id: account for account in watchlist or []}
+
+
+def _ordered_topic_notes(notes: list[Note], watchlist: list[WatchAccount] | None) -> list[Note]:
+    order = {account.account_id: i for i, account in enumerate(watchlist or [])}
+    notes_by_acc: dict[str, list[Note]] = {}
+    for note in notes:
+        notes_by_acc.setdefault(note.account_id, []).append(note)
+
+    account_ids = sorted(
+        notes_by_acc, key=lambda account_id: (order.get(account_id, len(order)), account_id)
+    )
+    ordered: list[Note] = []
+    for account_id in account_ids:
+        ordered.extend(
+            sorted(
+                notes_by_acc[account_id],
+                key=lambda note: (note.published_at, note.note_id),
+                reverse=True,
+            )
+        )
+    return ordered
+
+
+def _write_topic_feed_jsonl(
+    path: Path, notes: list[Note], watchlist: list[WatchAccount] | None
+) -> str:
+    watch_by_id = _watch_meta(watchlist)
+    lines = []
+    for note in _ordered_topic_notes(notes, watchlist):
+        account = watch_by_id.get(note.account_id)
+        lines.append(
+            json.dumps(
+                {
+                    "account_id": note.account_id,
+                    "nickname": account.nickname if account else "",
+                    "source": account.source if account else "",
+                    "note_id": note.note_id,
+                    "title": note.title,
+                    "body": note.body,
+                    "tags": note.tags,
+                    "url": note.url,
+                    "published_at": note.published_at,
+                    "collected_at": note.collected_at,
+                    "like_count": note.like_count,
+                    "collect_count": note.collect_count,
+                    "comment_count": note.comment_count,
+                },
+                ensure_ascii=False,
+            )
+        )
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return str(path)
+
+
+def _write_topic_feed_md(
+    path: Path,
+    notes: list[Note],
+    stats: WindowFilterStats,
+    window_days: int,
+    watchlist: list[WatchAccount] | None,
+) -> str:
+    watch_by_id = _watch_meta(watchlist)
+    ordered_notes = _ordered_topic_notes(notes, watchlist)
+    account_count = len({note.account_id for note in ordered_notes})
+    lines = [
+        (
+            f"窗口 {window_days} 天 · 入 feed {stats.kept} 条 · 出窗 {stats.out_of_window} "
+            f"· 缺时间 {stats.missing_time} · 账号 {account_count}"
+        ),
+        "",
+    ]
+    current_account_id = None
+    for note in ordered_notes:
+        if note.account_id != current_account_id:
+            account = watch_by_id.get(note.account_id)
+            nickname = account.nickname if account else ""
+            lines.extend([f"## {nickname}（{note.account_id}）", ""])
+            current_account_id = note.account_id
+        lines.append(f"- {note.published_at} {note.title} {note.url}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
 def export_all(
     out_dir,
     *,
@@ -71,6 +158,9 @@ def export_all(
     watchlist: list[WatchAccount] | None = None,
     creator_notes: list[Note] | None = None,
     account_profiles: list[AccountRank] | None = None,
+    topic_feed: list[Note] | None = None,
+    topic_feed_stats: WindowFilterStats | None = None,
+    topic_feed_window_days: int = 0,
 ) -> dict[str, str]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -235,6 +325,16 @@ def export_all(
                 ]
                 for r in account_profiles
             ],
+        )
+    if topic_feed is not None:
+        stats = topic_feed_stats or WindowFilterStats(
+            kept=len(topic_feed), out_of_window=0, missing_time=0
+        )
+        paths["topic_feed_jsonl"] = _write_topic_feed_jsonl(
+            out / "topic_feed.jsonl", topic_feed, watchlist
+        )
+        paths["topic_feed"] = _write_topic_feed_md(
+            out / "topic_feed.md", topic_feed, stats, topic_feed_window_days, watchlist
         )
     paths["report_input"] = _write_report(
         out / "report_input.md", ranks, typical_notes, comments, comment_top_k
