@@ -1,0 +1,38 @@
+# 测试配置：最小真实链路（1 词 × 3 账号 × 5 篇，关评论）——验证 cli 子命令用
+provider: mediacrawler
+mediacrawler_dir: ../MediaCrawler
+fixture_path: tests/fixtures/search_contents_sample.jsonl   # 降级用
+mediacrawler:
+  login_type: qrcode
+  cookies: ""
+  out_dir: data/raw
+  timeout: 600
+keywords: ["留学生辅导"]          # 测试只搜 1 词（inline，与 keywords_file 互斥）
+search:
+  pages: 1
+  limit: 20
+  sort: time_descending
+  window_days: 30
+ranking:
+  weights: { note_count: 10, keyword_hit: 5, interaction: 0.01, vertical: 10.0, activity: 1.0 }
+watchlist_file: configs/watchlist-测试.yaml
+watchlist:
+  auto_top_n: 0                 # 测试纯 manual，确定性
+  max_total: 3
+creator:
+  notes_per_account: 5
+selection:
+  top_notes_per_account: 2
+  half_life_days: 14
+comments:
+  enabled: false                # 测试不采评论（cli comments 单独验证时再开）
+  limit: 10
+  report_top_k: 3
+  max_notes: 30
+  fixture_path: tests/fixtures/comments.jsonl
+logging:
+  level: info
+  dir: data/logs
+  file_enabled: true
+export:
+  out_dir: data/exports
