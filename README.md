@@ -40,7 +40,7 @@ curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 **跑：**
 
 ```bash
-uv run python scripts/integration_mediacrawler.py --config configs/sample_mediacrawler.yaml
+uv run python scripts/integration_mediacrawler.py --config configs/sample_mediacrawler.yaml -v
 ```
 
 一次运行会起 2-3 个 MediaCrawler 子进程（每关键词一次 search + 一次 detail 读评论），每个子进程在采集浏览器里新开标签页驱动，属正常现象。9222 不可达时 MediaCrawler 会白等 60s 再回退自带浏览器（能跑但慢，且可能要求扫码）。
@@ -61,7 +61,14 @@ uv run python scripts/integration_mediacrawler.py --config configs/sample_mediac
 
 - `data/raw/<run>/` — MediaCrawler 原始 JSONL，按运行时间戳隔离（**评论 raw 含作者字段，仅本地留存，gitignore**）；
 - `data/exports/` — 最终导出（gitignore）；
+- `data/logs/` — 管线运行日志（gitignore），文件名形如 `run-<run_id>.log`；
 - 配置：`configs/sample.yaml`（fixture）/ `configs/sample_mediacrawler.yaml`（真实），键与缺省见文件内注释。
+
+## 日志
+
+控制台默认显示 INFO 阶段行；加 `--verbose` / `-v` 后控制台显示 DEBUG。每次运行会写 `data/logs/run-<run_id>.log`，文件日志固定 DEBUG，目录可在配置的 `logging.dir` 调整，也可用 `logging.file_enabled: false` 关闭。
+
+真实 MediaCrawler 子进程输出会完整落到本次 raw 目录的 `mediacrawler.log`。复盘真实采集时先看 `data/logs/run-*.log` 定位阶段和 raw_path，再打开对应 `mediacrawler.log` 看 MediaCrawler 原始 stdout/stderr。
 
 ## 架构
 

@@ -1,0 +1,32 @@
+# 日志系统 期1 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 tools/preflight.py --config cases/日志系统/期1/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+
+必过命令:                  # 退出码须 0
+  - { name: lint,         run: "uv run ruff check ." }
+  - { name: format,       run: "uv run ruff format --check ." }
+  - { name: tests,        run: "uv run pytest -q" }
+  - { name: demo-fixture, run: "uv run python -m src.pipelines.run_research --config configs/sample.yaml" }
+
+必存产物:                  # demo 跑完后须存在
+  - data/logs                                  # 运行日志目录（run-*.log 落此）
+  - configs/sample.yaml                        # 含 logging: 段
+
+必含符号:                  # 本期新增接口必须落地（grep 命中 ≥1）
+  - { grep: "def configure_logging",  in: "src/pipelines" }
+  - { grep: "class RunContextFilter", in: "src/pipelines" }
+  - { grep: "def log_result",         in: "src/pipelines" }
+  - { grep: "mediacrawler.log",       in: "src/adapters" }   # 子进程输出落盘
+  - { grep: "logging:",               in: "configs/sample.yaml" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",                 in: "src/core" }          # 铁律：core 平台无关
+  - { grep: "print(",              in: "src" }               # 日志系统落地后更无借口
+  - { grep: "from src.pipelines",  in: "src/core" }          # 层次红线：core 禁 import 组装点
+  - { grep: "from src.pipelines",  in: "src/adapters" }      # 层次红线：adapter 禁 import 组装点
+  # 注（评审#1 N4）：`import src.pipelines...` 写法可绕过上两条 grep——机械检查为下限，
+  # import 面貌由代码评审亲核。
+  - { grep: "loguru",              in: "src" }               # 越界：禁第三方日志库
+  - { grep: "structlog",           in: "src" }
+  # 日志红线（日志不含评论 body/身份字段）由 pytest 专项用例守——见方案 §6，
+  # pytest 在必过命令内；grep 无法区分「日志语句里的键」与「合法业务键」，故不在此表。

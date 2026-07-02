@@ -1,10 +1,13 @@
 """期1 适配器：读本地 fixture JSONL，经 parsers 出 FetchResult。零网络。"""
 
+import logging
 from pathlib import Path
 
 from src.adapters.parsers import parse_comments_jsonl_lines, parse_jsonl_lines
 from src.core.ports import ResearchAdapter
 from src.models import FetchResult, TypicalNote
+
+logger = logging.getLogger(__name__)
 
 
 class FixtureAdapter(ResearchAdapter):
@@ -15,6 +18,7 @@ class FixtureAdapter(ResearchAdapter):
         self._comments_path = Path(comments_path) if comments_path else None
 
     def search(self, keyword: str, page: int, limit: int, collected_at: str) -> FetchResult:
+        logger.debug("fixture search path=%s page=%s limit=%s", self._path, page, limit)
         try:
             text = self._path.read_text(encoding="utf-8")
         except OSError as e:
@@ -55,6 +59,7 @@ class FixtureAdapter(ResearchAdapter):
     ) -> FetchResult:
         if self._comments_path is None:
             raise NotImplementedError
+        logger.debug("fixture comments path=%s limit=%s", self._comments_path, limit)
         try:
             text = self._comments_path.read_text(encoding="utf-8")
         except OSError as e:
