@@ -6,7 +6,7 @@
 import csv
 from pathlib import Path
 
-from src.models import Account, AccountRank, Note, TypicalNote
+from src.models import Account, AccountRank, Comment, Note, TypicalNote
 
 PIPE = "|"
 
@@ -23,10 +23,26 @@ def _write_csv(path: Path, header: list[str], rows: list[list]) -> str:
     return str(path)
 
 
-def _write_report(path: Path, ranks: list[AccountRank], typical: list[TypicalNote]) -> str:
+def _clean_report_text(s: str) -> str:
+    return " ".join(s.split())
+
+
+def _write_report(
+    path: Path,
+    ranks: list[AccountRank],
+    typical: list[TypicalNote],
+    comments: list[Comment],
+    comment_top_k: int,
+) -> str:
     tn_by_acc: dict[str, list[TypicalNote]] = {}
     for t in typical:
         tn_by_acc.setdefault(t.account_id, []).append(t)
+    comments_by_note: dict[str, list[Comment]] = {}
+    for c in comments:
+        comments_by_note.setdefault(c.note_id, []).append(c)
+    for xs in comments_by_note.values():
+        xs.sort(key=lambda c: c.like_count, reverse=True)
+
     lines = ["# 竞品账号研究输入", ""]
     for r in ranks:
         lines.append(f"## {r.nickname}（{r.account_id}）")
@@ -36,6 +52,8 @@ def _write_report(path: Path, ranks: list[AccountRank], typical: list[TypicalNot
         )
         for t in tn_by_acc.get(r.account_id, []):
             lines.append(f"  - [{t.title}]({t.url}) · note_score {t.note_score:.0f}")
+            for c in comments_by_note.get(t.note_id, [])[:comment_top_k]:
+                lines.append(f"    - 评论 {c.like_count}赞：{_clean_report_text(c.body)}")
         lines.append("")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(path)
@@ -48,6 +66,8 @@ def export_all(
     notes: list[Note],
     ranks: list[AccountRank],
     typical_notes: list[TypicalNote],
+    comments: list[Comment] = [],
+    comment_top_k: int = 3,
 ) -> dict[str, str]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -143,5 +163,13 @@ def export_all(
             for t in typical_notes
         ],
     )
-    paths["report_input"] = _write_report(out / "report_input.md", ranks, typical_notes)
+    if comments:
+        paths["comments"] = _write_csv(
+            out / "comments.csv",
+            ["body", "note_id", "like_count", "collected_at"],
+            [[c.body, c.note_id, c.like_count, c.collected_at] for c in comments],
+        )
+    paths["report_input"] = _write_report(
+        out / "report_input.md", ranks, typical_notes, comments, comment_top_k
+    )
     return paths
