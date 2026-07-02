@@ -23,5 +23,9 @@ comments:
   limit: 10
   report_top_k: 3
   fixture_path: tests/fixtures/comments.jsonl   # MediaCrawler 不可用降级 fixture 时使用
+logging:
+  level: info
+  dir: data/logs
+  file_enabled: true
 export:
   out_dir: data/exports

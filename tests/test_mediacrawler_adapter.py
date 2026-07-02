@@ -79,9 +79,7 @@ def test_search_replacement_character_output_still_parses(tmp_path, monkeypatch)
 def test_run_crawler_replaces_invalid_output_bytes(tmp_path):
     script = tmp_path / "bad_bytes.py"
     script.write_text(
-        "import sys\n"
-        "sys.stdout.buffer.write(b'ok')\n"
-        "sys.stderr.buffer.write(b'bad\\xe8bytes')\n",
+        "import sys\nsys.stdout.buffer.write(b'ok')\nsys.stderr.buffer.write(b'bad\\xe8bytes')\n",
         encoding="utf-8",
     )
     a = MediaCrawlerAdapter(str(tmp_path), tmp_path, launcher=[sys.executable])

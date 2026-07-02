@@ -18,5 +18,9 @@ comments:
   limit: 10
   report_top_k: 3
   fixture_path: tests/fixtures/comments.jsonl
+logging:
+  level: info
+  dir: data/logs
+  file_enabled: true
 export:
   out_dir: data/exports
