@@ -21,7 +21,7 @@ from src.core.note_selector import select_typical_notes
 from src.core.ports import ResearchAdapter
 from src.core.time_window import filter_notes
 from src.models import FetchResult
-from src.pipelines.logging_setup import configure_logging, log_result
+from src.pipelines.logging_setup import _compact_run_id, configure_logging, log_result
 
 app = typer.Typer(add_completion=False)
 logger = logging.getLogger(__name__)
@@ -151,9 +151,11 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     else:
         logger.info("评论：跳过（未启用）")
 
-    out_dir = config.get("export", {}).get("out_dir", "data/exports")
+    # 按运行归档：每次导出独立时间戳目录（与 run 日志同一时间戳，可互相对上），不覆盖历史
+    out_base = Path(config.get("export", {}).get("out_dir", "data/exports"))
+    run_dir = out_base / _compact_run_id(collected_at)
     paths = export_all(
-        out_dir,
+        run_dir,
         accounts=accounts,
         notes=notes,
         ranks=ranks,
@@ -161,8 +163,23 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
         comments=comments,
         comment_top_k=comments_cfg.get("report_top_k", 3),
     )
-    logger.info("✓ 导出 %d 个文件 → %s", len(paths), out_dir)
+    _update_latest_link(out_base, run_dir)
+    logger.info("✓ 导出 %d 个文件 → %s", len(paths), run_dir)
     return paths
+
+
+def _update_latest_link(base: Path, run_dir: Path) -> None:
+    """维护 base/latest 软链指向最新一次运行目录；失败只警告不拦管线（旁路口径）。"""
+    latest = base / "latest"
+    try:
+        if latest.is_symlink():
+            latest.unlink()
+        elif latest.exists():
+            logger.warning("latest 已存在且不是软链，跳过更新：%s", latest)
+            return
+        latest.symlink_to(run_dir.name, target_is_directory=True)
+    except OSError as e:
+        logger.warning("latest 软链更新失败：%s", e)
 
 
 @app.command()

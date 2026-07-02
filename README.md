@@ -48,7 +48,9 @@ uv run python scripts/integration_mediacrawler.py --config configs/sample_mediac
 
 一次运行会起 2-3 个 MediaCrawler 子进程（每关键词一次 search + 一次 detail 读评论），每个子进程在采集浏览器里新开标签页驱动，属正常现象。9222 不可达时 MediaCrawler 会白等 60s 再回退自带浏览器（能跑但慢，且可能要求扫码）。
 
-## 产出（`data/exports/`）
+## 产出（`data/exports/<时间戳>/`，按运行归档不覆盖）
+
+每次运行导出到独立时间戳目录（与 `data/logs/run-*.log` 同一时间戳，可互相对上）；`data/exports/latest/` 软链永远指向最新一次——**日常看 `data/exports/latest/report_input.md` 即可**。
 
 | 文件 | 内容 | 给谁 |
 |---|---|---|
@@ -63,7 +65,7 @@ uv run python scripts/integration_mediacrawler.py --config configs/sample_mediac
 ## 数据目录
 
 - `data/raw/<run>/` — MediaCrawler 原始 JSONL，按运行时间戳隔离（**评论 raw 含作者字段，仅本地留存，gitignore**）；
-- `data/exports/` — 最终导出（gitignore）；
+- `data/exports/<时间戳>/` — 最终导出，按运行归档不覆盖；`exports/latest/` 软链指向最新（gitignore）；
 - `data/logs/` — 管线运行日志（gitignore），文件名形如 `run-<run_id>.log`；
 - 配置：`configs/sample.yaml`（fixture）/ `configs/sample_mediacrawler.yaml`（真实），键与缺省见文件内注释。
 
