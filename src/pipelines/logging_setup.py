@@ -15,7 +15,10 @@ from src.models import FetchResult
 
 HANDLER_PREFIX = "xhsrecon."
 CONSOLE_DATEFMT = "%H:%M:%S"
-FILE_FORMAT = "%(asctime)s %(levelname)-7s %(name)s [%(provider)s %(run_id)s] %(message)s"
+FILE_FORMAT = (
+    "%(asctime)s %(levelname)-7s %(name)s %(filename)s:%(lineno)d"
+    " [%(provider)s %(run_id)s] %(message)s"
+)
 
 # 评论采集等操作名 → 人话（log_result 失败行用）
 _OP_CN = {"search": "搜索", "fetch_comments": "评论采集"}
@@ -34,7 +37,11 @@ class ConsoleFormatter(logging.Formatter):
             record.mark = "⚠ "
         else:
             record.mark = ""
-        return super().format(record)
+        line = super().format(record)
+        if record.levelno >= logging.WARNING:
+            # 警告以上带出处，便于定位（成功路径不加，保持叙事干净）
+            line += f" · {record.filename}:{record.lineno}"
+        return line
 
 
 class RunContextFilter(logging.Filter):
@@ -84,15 +91,16 @@ def configure_logging(cfg: dict | None, *, verbose: bool, run_id: str, provider:
     console.addFilter(context_filter)
     root.addHandler(console)
 
+    log_path = None
     if cfg.get("file_enabled", True):
         log_dir = Path(cfg.get("dir", "data/logs"))
         try:
             log_dir.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(
-                log_dir / f"run-{_compact_run_id(run_id)}.log", encoding="utf-8"
-            )
+            log_path = log_dir / f"run-{_compact_run_id(run_id)}.log"
+            file_handler = logging.FileHandler(log_path, encoding="utf-8")
         except OSError as e:
-            logging.getLogger(__name__).warning("file logging disabled: %s", e)
+            log_path = None
+            logging.getLogger(__name__).warning("文件日志不可用：%s（仅控制台输出）", e)
         else:
             file_handler.set_name(f"{HANDLER_PREFIX}file")
             file_handler.setLevel(logging.DEBUG)
@@ -100,12 +108,17 @@ def configure_logging(cfg: dict | None, *, verbose: bool, run_id: str, provider:
             file_handler.addFilter(context_filter)
             root.addHandler(file_handler)
 
-    # 头行：控制台短格式下的 run 上下文交代（文件里每行本就带 [provider run_id]）
-    logging.getLogger(__name__).info("▶ 开始运行 · 数据源 %s", provider)
+    # 头行：控制台短格式下的 run 上下文交代（文件里每行本就带 [provider run_id]）；
+    # 同时预告全量日志位置——报错时知道去哪翻。
+    if log_path:
+        logging.getLogger(__name__).info("▶ 开始运行 · 数据源 %s · 全量日志 %s", provider, log_path)
+    else:
+        logging.getLogger(__name__).info("▶ 开始运行 · 数据源 %s", provider)
 
 
 def log_result(logger: logging.Logger, fr: FetchResult) -> None:
     # 成功走 DEBUG：阶段行（INFO）已含同等信息，避免控制台每步两行重复。
+    # stacklevel=2：日志出处指向调用现场（run_research 的那一行），而非本帮手函数
     if fr.ok:
         logger.debug(
             "%s ok: %d notes %d accounts %d comments",
@@ -113,8 +126,20 @@ def log_result(logger: logging.Logger, fr: FetchResult) -> None:
             len(fr.notes),
             len(fr.accounts),
             len(fr.comments),
+            stacklevel=2,
         )
         return
     op = _OP_CN.get(fr.operation, fr.operation)
     kw = f"「{fr.keyword}」" if fr.keyword else ""
-    logger.warning("%s%s失败：%s（管线继续）", op, kw, fr.error)
+    if fr.raw_path:
+        # 采集类失败给出详情文件位置（MediaCrawler 子进程完整输出）
+        logger.warning(
+            "%s%s失败：%s（管线继续）· 采集日志 %s/mediacrawler.log",
+            op,
+            kw,
+            fr.error,
+            fr.raw_path,
+            stacklevel=2,
+        )
+    else:
+        logger.warning("%s%s失败：%s（管线继续）", op, kw, fr.error, stacklevel=2)
