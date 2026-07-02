@@ -2,12 +2,24 @@ import subprocess
 from pathlib import Path
 
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
+from src.models import TypicalNote
 
 SAMPLE = "tests/fixtures/search_contents_sample.jsonl"
 
 
 def _adapter(tmp_path, **kw):
     return MediaCrawlerAdapter("/some/mediacrawler", tmp_path, **kw)
+
+
+def _typical(note_id: str, url: str) -> TypicalNote:
+    return TypicalNote(
+        account_id="u",
+        note_id=note_id,
+        title=f"title {note_id}",
+        url=url,
+        note_score=1.0,
+        selection_reason="test",
+    )
 
 
 def test_build_command_has_compliance_flags(tmp_path):
@@ -84,3 +96,73 @@ def test_launcher_default_and_configurable(tmp_path):
     ]
     cmd = _adapter(tmp_path, launcher=["python3"])._build_command("k", 1, 20, tmp_path)
     assert cmd[:2] == ["python3", "main.py"]
+
+
+def test_fetch_comments_builds_detail_command_and_reads_jsonl(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    commands = []
+
+    def fake_run(cmd):
+        commands.append(cmd)
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "detail_comments_2026-06-24.jsonl").write_text(
+            "\n".join(
+                [
+                    '{"content":"第一条","note_id":"n1","like_count":"1万","user_id":"u1"}',
+                    '{"content":"第二条","note_id":"n2","like_count":"8","nickname":"nick"}',
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return 0, ""
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    notes = [
+        _typical("n1", "https://xhs.example/n1?xsec_token=a"),
+        _typical("n2", "https://xhs.example/n2?xsec_token=b"),
+    ]
+
+    r = a.fetch_comments(notes, 7, "2026-06-24T00:00:00Z")
+
+    assert r.ok
+    assert [c.body for c in r.comments] == ["第一条", "第二条"]
+    assert [c.like_count for c in r.comments] == [10000, 8]
+    cmd = commands[0]
+    assert cmd[cmd.index("--type") + 1] == "detail"
+    assert cmd[cmd.index("--specified_id") + 1] == (
+        "https://xhs.example/n1?xsec_token=a,https://xhs.example/n2?xsec_token=b"
+    )
+    assert cmd[cmd.index("--get_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
+    assert cmd[cmd.index("--max_comments_count_singlenotes") + 1] == "7"
+    assert cmd[cmd.index("--enable_ip_proxy") + 1] == "no"
+    assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"
+    assert cmd[cmd.index("--lt") + 1] == "qrcode"
+    assert cmd[cmd.index("--save_data_path") + 1].endswith("2026-06-24T00-00-00Z-comments")
+
+
+def test_fetch_comments_empty_urls_short_circuits(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fail_run(cmd):
+        raise AssertionError("crawler should not run")
+
+    monkeypatch.setattr(a, "_run_crawler", fail_run)
+    r = a.fetch_comments([_typical("n1", "")], 10, "2026")
+
+    assert r.ok
+    assert r.comments == []
+    assert r.command is None
+
+
+def test_fetch_comments_nonzero_exit_is_error(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    monkeypatch.setattr(a, "_run_crawler", lambda cmd: (1, "boom"))
+
+    r = a.fetch_comments([_typical("n1", "https://xhs.example/n1")], 10, "2026")
+
+    assert not r.ok
+    assert r.comments == []
+    assert "exit 1" in r.error
