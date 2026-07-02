@@ -30,7 +30,8 @@ uv run python -m src.pipelines.run_research --config configs/sample.yaml
 
 ```bash
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9222 --user-data-dir="$HOME/.xhs-recon-chrome" &
+  --remote-debugging-port=9222 --user-data-dir="$HOME/.xhs-recon-chrome" \
+  >/dev/null 2>&1 &     # 静音：Chrome 内部日志不刷终端；成功标志=curl 有返回
 
 curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 ```
