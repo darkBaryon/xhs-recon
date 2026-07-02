@@ -1,3 +1,4 @@
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -49,13 +50,14 @@ def test_search_success_reads_and_parses(tmp_path, monkeypatch):
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
         (d / "search_contents_2026-06-24.jsonl").write_text(sample, encoding="utf-8")
-        return 0, ""
+        return 0, "crawler stdout"
 
     monkeypatch.setattr(a, "_run_crawler", fake_run)
     r = a.search("留学辅导", 1, 20, "2026-06-24T00:00:00Z")
     assert r.ok
     assert len(r.notes) == 5
     assert r.notes[0].like_count == 10000  # 复用期1 parsers，"1万"→10000
+    assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "crawler stdout"
 
 
 def test_search_replacement_character_output_still_parses(tmp_path, monkeypatch):
@@ -79,9 +81,7 @@ def test_search_replacement_character_output_still_parses(tmp_path, monkeypatch)
 def test_run_crawler_replaces_invalid_output_bytes(tmp_path):
     script = tmp_path / "bad_bytes.py"
     script.write_text(
-        "import sys\n"
-        "sys.stdout.buffer.write(b'ok')\n"
-        "sys.stderr.buffer.write(b'bad\\xe8bytes')\n",
+        "import sys\nsys.stdout.buffer.write(b'ok')\nsys.stderr.buffer.write(b'bad\\xe8bytes')\n",
         encoding="utf-8",
     )
     a = MediaCrawlerAdapter(str(tmp_path), tmp_path, launcher=[sys.executable])
@@ -92,11 +92,14 @@ def test_run_crawler_replaces_invalid_output_bytes(tmp_path):
     assert "bad\ufffdbytes" in out
 
 
-def test_search_nonzero_exit_is_error(tmp_path, monkeypatch):
+def test_search_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, monkeypatch, caplog):
     a = _adapter(tmp_path)
     monkeypatch.setattr(a, "_run_crawler", lambda cmd: (1, "boom"))
-    r = a.search("k", 1, 20, "2026-06-24T00:00:00Z")
+    with caplog.at_level(logging.WARNING):
+        r = a.search("k", 1, 20, "2026-06-24T00:00:00Z")
     assert not r.ok and "exit 1" in r.error
+    assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "boom"
+    assert "MediaCrawler 退出码 1" in caplog.text
 
 
 def test_search_empty_output_is_error(tmp_path, monkeypatch):
@@ -151,7 +154,7 @@ def test_fetch_comments_builds_detail_command_and_reads_jsonl(tmp_path, monkeypa
             ),
             encoding="utf-8",
         )
-        return 0, ""
+        return 0, "comments stdout"
 
     monkeypatch.setattr(a, "_run_crawler", fake_run)
     notes = [
@@ -164,6 +167,7 @@ def test_fetch_comments_builds_detail_command_and_reads_jsonl(tmp_path, monkeypa
     assert r.ok
     assert [c.body for c in r.comments] == ["第一条", "第二条"]
     assert [c.like_count for c in r.comments] == [10000, 8]
+    assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "comments stdout"
     cmd = commands[0]
     assert cmd[cmd.index("--type") + 1] == "detail"
     assert cmd[cmd.index("--specified_id") + 1] == (
@@ -192,12 +196,15 @@ def test_fetch_comments_empty_urls_short_circuits(tmp_path, monkeypatch):
     assert r.command is None
 
 
-def test_fetch_comments_nonzero_exit_is_error(tmp_path, monkeypatch):
+def test_fetch_comments_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, monkeypatch, caplog):
     a = _adapter(tmp_path)
     monkeypatch.setattr(a, "_run_crawler", lambda cmd: (1, "boom"))
 
-    r = a.fetch_comments([_typical("n1", "https://xhs.example/n1")], 10, "2026")
+    with caplog.at_level(logging.WARNING):
+        r = a.fetch_comments([_typical("n1", "https://xhs.example/n1")], 10, "2026")
 
     assert not r.ok
     assert r.comments == []
     assert "exit 1" in r.error
+    assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "boom"
+    assert "MediaCrawler 退出码 1" in caplog.text
