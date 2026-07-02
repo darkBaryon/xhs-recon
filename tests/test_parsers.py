@@ -1,6 +1,7 @@
 from src.adapters.parsers import (
     epoch_ms_to_iso,
     normalize_count,
+    normalize_creator_ref,
     parse_comment,
     parse_comments_jsonl_lines,
     parse_note,
@@ -22,6 +23,42 @@ def test_split_tags():
     assert split_tags("a,b,c") == ["a", "b", "c"]
     assert split_tags("") == []
     assert split_tags("  x , y ") == ["x", "y"]
+
+
+def test_normalize_creator_ref_accepts_pure_user_id():
+    assert normalize_creator_ref("66f0aabbccddeeff00112233") == "66f0aabbccddeeff00112233"
+
+
+def test_normalize_creator_ref_accepts_profile_url_with_query():
+    ref = "https://www.xiaohongshu.com/user/profile/66f0aabbccddeeff00112233?xsec_token=abc"
+
+    assert normalize_creator_ref(ref) == "66f0aabbccddeeff00112233"
+
+
+def test_normalize_creator_ref_lowercases_uppercase_id():
+    assert normalize_creator_ref("66F0AABBCCDDEEFF00112233") == "66f0aabbccddeeff00112233"
+
+
+def test_normalize_creator_ref_rejects_other_domain_with_original_ref():
+    ref = "https://example.com/user/profile/66f0aabbccddeeff00112233"
+
+    try:
+        normalize_creator_ref(ref)
+    except ValueError as e:
+        assert ref in str(e)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_normalize_creator_ref_rejects_wrong_length_with_original_ref():
+    ref = "66f0aabbccddeeff001122"
+
+    try:
+        normalize_creator_ref(ref)
+    except ValueError as e:
+        assert ref in str(e)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_parse_note_field_mapping():

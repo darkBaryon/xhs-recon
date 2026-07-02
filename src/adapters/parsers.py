@@ -4,9 +4,13 @@
 """
 
 import json
+import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from src.models import Account, Comment, Note
+
+CREATOR_ID_RE = re.compile(r"^[0-9a-fA-F]{24}$")
 
 
 def normalize_count(raw) -> int:
@@ -28,6 +32,27 @@ def split_tags(raw) -> list[str]:
     if not raw:
         return []
     return [t.strip() for t in str(raw).split(",") if t.strip()]
+
+
+def normalize_creator_ref(ref: str) -> str:
+    original = ref
+    text = str(ref).strip()
+    if CREATOR_ID_RE.fullmatch(text):
+        return text.lower()
+
+    parsed = urlparse(text)
+    path_parts = parsed.path.strip("/").split("/")
+    if (
+        parsed.scheme == "https"
+        and parsed.netloc.lower() == "www.xiaohongshu.com"
+        and len(path_parts) == 3
+        and path_parts[0] == "user"
+        and path_parts[1] == "profile"
+        and CREATOR_ID_RE.fullmatch(path_parts[2])
+    ):
+        return path_parts[2].lower()
+
+    raise ValueError(f"invalid creator ref: {original}")
 
 
 def epoch_ms_to_iso(ms) -> str:
