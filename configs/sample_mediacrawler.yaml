@@ -21,7 +21,7 @@ ranking:
 watchlist_file: configs/watchlist-留学辅导.yaml   # 账号资产外置（与 watchlist.manual 互斥）
 watchlist:
   auto_top_n: 2
-  max_total: 10   # manual 8 + auto 2 顶格（蓝图用量上限 10）
+  max_total: 30   # 2026-07-03 用户拍板：上限由 10 提至 30（用量口径变更）
 creator:
   notes_per_account: 10
 selection:
