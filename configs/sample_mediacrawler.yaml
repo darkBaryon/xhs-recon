@@ -5,9 +5,7 @@ mediacrawler:
   login_type: qrcode                       # 或 cookie（配 cookies）
   cookies: ""
   out_dir: data/raw                        # 真实采集 raw 落此（gitignore）
-keywords: ["留学辅导"]
-synonyms:
-  留学辅导: ["essay辅导"]
+keywords_file: configs/keywords-留学辅导.yaml     # 词表资产外置（与 inline keywords/synonyms 互斥）
 search:
   pages: 1
   limit: 20
@@ -20,12 +18,9 @@ ranking:
     interaction: 0.01
     vertical: 10.0
     activity: 1.0
+watchlist_file: configs/watchlist-留学辅导.yaml   # 账号资产外置（与 watchlist.manual 互斥）
 watchlist:
   auto_top_n: 2
-  manual:
-    - 638ea9d7000000001f01d7f7   # 路觅留学生课程辅导
-    - 63a95006000000002801986e   # 辅无忧留学课业辅导规划站
-    - 670cac2a000000001d030d44   # Alevel经济张老师-上海超级学长
   max_total: 5
 creator:
   notes_per_account: 10

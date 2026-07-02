@@ -99,8 +99,50 @@ def _backfill_watchlist_nicknames(
     ]
 
 
+def _read_asset_yaml(path_str: str) -> dict:
+    path = Path(path_str)
+    if not path.exists():
+        raise ValueError(f"引用的资产文件不存在：{path_str}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"资产文件顶层须为键值映射：{path_str}")
+    return data
+
+
+def _resolve_config_refs(config: dict) -> dict:
+    """解析 keywords_file / watchlist_file 两个可选资产引用（双源冲突即报错，不静默合并）。"""
+    keywords_file = config.get("keywords_file")
+    if keywords_file:
+        if "keywords" in config or "synonyms" in config:
+            raise ValueError("keywords_file 与主配置 keywords/synonyms 不可同时提供，二选一")
+        data = _read_asset_yaml(keywords_file)
+        if "keywords" not in data:
+            raise ValueError(f"keywords_file 缺少 keywords 键：{keywords_file}")
+        config["keywords"] = data["keywords"]
+        if "synonyms" in data:
+            config["synonyms"] = data["synonyms"]
+
+    watchlist_file = config.get("watchlist_file")
+    if watchlist_file:
+        watchlist_cfg = config.get("watchlist") or {}
+        if watchlist_cfg.get("manual"):
+            raise ValueError("watchlist_file 与主配置 watchlist.manual 不可同时提供，二选一")
+        data = _read_asset_yaml(watchlist_file)
+        if "manual" not in data:
+            raise ValueError(f"watchlist_file 缺少 manual 键：{watchlist_file}")
+        watchlist_cfg["manual"] = data["manual"]
+        # 主配置无 watchlist 段时自动创建（默认 auto_top_n/max_total 生效）
+        config["watchlist"] = watchlist_cfg
+    return config
+
+
 def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     config = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    try:
+        config = _resolve_config_refs(config)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
     collected_at = _now_iso()
     adapter = _build_adapter(config)
     configure_logging(

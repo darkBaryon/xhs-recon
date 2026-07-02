@@ -82,7 +82,8 @@ uv run python -m src.pipelines.run_research --config configs/sample_mediacrawler
 - `data/raw/<run>/` — MediaCrawler 原始 JSONL，按运行时间戳隔离（**评论 raw 含作者字段，仅本地留存，gitignore**）；
 - `data/exports/<时间戳>/` — 最终导出，按运行归档不覆盖；`exports/latest/` 软链指向最新（gitignore）；
 - `data/logs/` — 管线运行日志（gitignore），文件名形如 `run-<run_id>.log`；
-- 配置：`configs/sample.yaml`（fixture）/ `configs/sample_mediacrawler.yaml`（真实），键与缺省见文件内注释。
+- 配置：`configs/sample.yaml`（fixture）/ `configs/sample_mediacrawler.yaml`（真实），键与缺省见文件内注释；
+- 领域资产外置：主配置可选 `keywords_file` / `watchlist_file` 引用独立资产文件（如 `configs/keywords-留学辅导.yaml` 词表、`configs/watchlist-留学辅导.yaml` 账号清单）——换赛道换资产文件，运行参数不动；与 inline 同键互斥（双源报错）。
 
 ## 日志
 
