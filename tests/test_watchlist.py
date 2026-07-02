@@ -107,3 +107,23 @@ def test_build_watchlist_empty_ranked_keeps_manual_with_blank_nickname():
     assert watchlist[0].account_id == "000000000000000000000099"
     assert watchlist[0].nickname == ""
     assert watchlist[0].source == "manual"
+
+
+def test_build_watchlist_truncation_warns_with_dropped_ids(caplog):
+    """B6：超 max_total 砍尾必须留痕（manual 手写项被无声丢弃是事故）。"""
+    import logging
+
+    manual = ["a" * 24, "b" * 24, "c" * 24]
+    with caplog.at_level(logging.WARNING, logger="src.core.watchlist"):
+        result = build_watchlist([], manual, auto_top_n=0, max_total=2)
+    assert len(result) == 2
+    assert "截掉 1 个" in caplog.text
+    assert "c" * 24 in caplog.text  # 被丢的是谁要说清
+
+
+def test_build_watchlist_no_warning_when_within_cap(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="src.core.watchlist"):
+        build_watchlist([], ["a" * 24], auto_top_n=0, max_total=5)
+    assert "截掉" not in caplog.text
