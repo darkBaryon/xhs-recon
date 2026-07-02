@@ -20,9 +20,11 @@ def test_mediacrawler_present_dir_returns_mc_adapter(tmp_path):
         "mediacrawler_dir": str(tmp_path),
         "fixture_path": FIXTURE,
         "mediacrawler": {},
-        "search": {"limit": 20},
+        "search": {"limit": 20, "sort": "time_descending"},
     }
-    assert isinstance(_build_adapter(cfg), MediaCrawlerAdapter)
+    adapter = _build_adapter(cfg)
+    assert isinstance(adapter, MediaCrawlerAdapter)
+    assert adapter.sort_type == "time_descending"
 
 
 def test_default_provider_is_fixture():

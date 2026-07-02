@@ -41,6 +41,12 @@ def test_cookies_appended_only_when_set(tmp_path):
     assert cmd[cmd.index("--cookies") + 1] == "abc"
 
 
+def test_sort_type_appended_only_when_set(tmp_path):
+    assert "--sort_type" not in _adapter(tmp_path)._build_command("k", 1, 20, tmp_path)
+    cmd = _adapter(tmp_path, sort_type="time_descending")._build_command("k", 1, 20, tmp_path)
+    assert cmd[cmd.index("--sort_type") + 1] == "time_descending"
+
+
 def test_search_success_reads_and_parses(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
     sample = Path(SAMPLE).read_text(encoding="utf-8")

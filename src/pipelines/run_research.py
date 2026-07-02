@@ -19,6 +19,8 @@ from src.core.exporter import export_all
 from src.core.keyword_expander import expand_keywords
 from src.core.note_selector import select_typical_notes
 from src.core.ports import ResearchAdapter
+from src.core.time_window import filter_notes
+from src.models import FetchResult
 from src.pipelines.logging_setup import configure_logging, log_result
 
 app = typer.Typer(add_completion=False)
@@ -32,6 +34,7 @@ def _now_iso() -> str:
 def _build_adapter(config: dict) -> ResearchAdapter:
     provider = config.get("provider", "fixture")
     comments_path = config.get("comments", {}).get("fixture_path")
+    search_cfg = config.get("search", {})
     if provider == "mediacrawler":
         mc_dir = config["mediacrawler_dir"]
         if Path(mc_dir).exists():
@@ -41,11 +44,40 @@ def _build_adapter(config: dict) -> ResearchAdapter:
                 out_dir=mc.get("out_dir", "data/raw"),
                 login_type=mc.get("login_type", "qrcode"),
                 cookies=mc.get("cookies", ""),
-                max_notes=config.get("search", {}).get("limit", 20),
+                sort_type=search_cfg.get("sort", ""),
+                max_notes=search_cfg.get("limit", 20),
             )
         # 路径 (a)：MediaCrawler 目录不可用 → 启动降级 fixture
         return FixtureAdapter(config["fixture_path"], comments_path=comments_path)
     return FixtureAdapter(config["fixture_path"], comments_path=comments_path)
+
+
+def _apply_time_window(
+    results: list[FetchResult], window_days: int, collected_at: str
+) -> list[FetchResult]:
+    if window_days <= 0:
+        return results
+
+    filtered_results: list[FetchResult] = []
+    kept = 0
+    out_of_window = 0
+    missing_time = 0
+
+    for result in results:
+        if not result.ok:
+            filtered_results.append(result)
+            continue
+
+        notes, stats = filter_notes(result.notes, window_days, collected_at)
+        kept += stats.kept
+        out_of_window += stats.out_of_window
+        missing_time += stats.missing_time
+        filtered_results.append(result.model_copy(update={"notes": notes}))
+
+    typer.echo(
+        f"time_window: kept={kept} out_of_window={out_of_window} missing_time={missing_time}"
+    )
+    return filtered_results
 
 
 def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
@@ -82,12 +114,19 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
             )
             results.append(result)
 
+    results = _apply_time_window(results, search_cfg.get("window_days", 0), collected_at)
     notes, accounts = aggregate(results)
     logger.info("聚合去重：笔记 %d · 账号 %d", len(notes), len(accounts))
     ranks = rank_accounts(accounts, notes, config.get("ranking", {}).get("weights"))
     logger.info("账号打分：%d 个", len(ranks))
-    top = config.get("selection", {}).get("top_notes_per_account", 2)
-    typical = select_typical_notes(notes, top)
+    selection_cfg = config.get("selection", {})
+    top = selection_cfg.get("top_notes_per_account", 2)
+    typical = select_typical_notes(
+        notes,
+        top,
+        half_life_days=selection_cfg.get("half_life_days", 0),
+        now_iso=collected_at,
+    )
     logger.info("选出典型笔记：%d 条", len(typical))
 
     comments_cfg = config.get("comments", {})

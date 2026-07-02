@@ -31,6 +31,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         *,
         login_type: str = "qrcode",
         cookies: str = "",
+        sort_type: str = "",
         max_notes: int = 20,
         timeout: int = 600,
         launcher: list[str] | None = None,
@@ -40,6 +41,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self.out_dir = Path(out_dir).resolve()
         self.login_type = login_type
         self.cookies = cookies
+        self.sort_type = sort_type
         self.max_notes = max_notes
         self.timeout = timeout
         # MediaCrawler 以 uv 管理（有 uv.lock/pyproject）；用其环境跑以带上 Playwright。
@@ -81,6 +83,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         ]
         if self.cookies:
             cmd += ["--cookies", self.cookies]
+        if self.sort_type:
+            cmd += ["--sort_type", self.sort_type]
         return cmd
 
     def _build_comments_command(self, urls: list[str], limit: int, save_path: Path) -> list[str]:
