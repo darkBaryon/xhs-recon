@@ -41,3 +41,17 @@ def test_fixture_provider_consumes_creator_fixture_path():
 
     assert isinstance(adapter, FixtureAdapter)
     assert str(adapter._creator_path) == CREATOR
+
+
+def test_mediacrawler_timeout_configurable(tmp_path):
+    """B4：mediacrawler.timeout 可配（默认 600）——多账号串行总时长的唯一调节阀。"""
+    cfg = {
+        "provider": "mediacrawler",
+        "mediacrawler_dir": str(tmp_path),  # 存在即走真 adapter 分支
+        "fixture_path": FIXTURE,
+        "mediacrawler": {"timeout": 300},
+    }
+    adapter = _build_adapter(cfg)
+    assert isinstance(adapter, MediaCrawlerAdapter)
+    assert adapter.timeout == 300
+    assert _build_adapter({**cfg, "mediacrawler": {}}).timeout == 600  # 缺省不变

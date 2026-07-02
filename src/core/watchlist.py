@@ -3,7 +3,11 @@
 core 层只处理已经归一化的账号 id；平台 URL 解析停留在 adapter 边界。
 """
 
+import logging
+
 from src.models import AccountRank, WatchAccount
+
+logger = logging.getLogger(__name__)
 
 
 def build_watchlist(
@@ -36,4 +40,14 @@ def build_watchlist(
             WatchAccount(account_id=rank.account_id, nickname=rank.nickname, source="auto")
         )
 
-    return accounts[: max(0, max_total)]
+    cap = max(0, max_total)
+    dropped = accounts[cap:]
+    if dropped:
+        # 静默砍尾会无声丢账号（含 manual 手写项）——超限必须留痕
+        logger.warning(
+            "watchlist 超上限 max_total=%d，截掉 %d 个：%s",
+            max_total,
+            len(dropped),
+            ",".join(a.account_id for a in dropped),
+        )
+    return accounts[:cap]

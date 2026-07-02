@@ -306,3 +306,46 @@ def test_fetch_creator_notes_partial_failure_keeps_success_notes(tmp_path, monke
     assert r.raw_path.endswith("creator")
     assert " && " in r.command
     assert "MediaCrawler 退出码 1" in caplog.text
+
+
+def test_search_save_path_isolated_per_keyword_and_page(tmp_path):
+    """B1：每词/页独立子目录——共享目录会让后词读回前词的累积 JSONL。"""
+    a = _adapter(tmp_path)
+    ts = "2026-06-24T00:00:00Z"
+    p1 = a._search_save_path(ts, "留学辅导", 1)
+    p2 = a._search_save_path(ts, "essay辅导", 1)
+    p3 = a._search_save_path(ts, "留学辅导", 2)
+    assert len({p1, p2, p3}) == 3  # 词间、页间互不共享
+    assert p1 == a._search_save_path(ts, "留学辅导", 1)  # 同输入确定性
+    assert p1.parent == a._save_path(ts)  # 仍在本次 run 目录之下
+
+
+def test_search_uses_isolated_save_path_in_command(tmp_path, monkeypatch):
+    seen = []
+
+    def fake_run(cmd):
+        seen.append(Path(cmd[cmd.index("--save_data_path") + 1]))
+        return 1, "boom"  # 直接失败即可，只看命令
+
+    a = _adapter(tmp_path)
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    a.search("留学辅导", 1, 20, "2026-06-24T00:00:00Z")
+    a.search("essay辅导", 1, 20, "2026-06-24T00:00:00Z")
+    assert seen[0] != seen[1]
+
+
+def test_search_corrupt_jsonl_is_error_not_crash(tmp_path, monkeypatch):
+    """B2：读回坏行进 error（与 comments/creator 同口径），不穿透崩管线。"""
+
+    def fake_run(cmd):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_contents_2026-06-24.jsonl").write_text("{broken json", encoding="utf-8")
+        return 0, "ok"
+
+    a = _adapter(tmp_path)
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.search("留学辅导", 1, 20, "2026-06-24T00:00:00Z")
+    assert not r.ok
+    assert "read results failed" in r.error
