@@ -55,3 +55,18 @@ def test_mediacrawler_timeout_configurable(tmp_path):
     assert isinstance(adapter, MediaCrawlerAdapter)
     assert adapter.timeout == 300
     assert _build_adapter({**cfg, "mediacrawler": {}}).timeout == 600  # 缺省不变
+
+
+def test_mediacrawler_speed_controls_configurable(tmp_path):
+    cfg = {
+        "provider": "mediacrawler",
+        "mediacrawler_dir": str(tmp_path),
+        "fixture_path": FIXTURE,
+        "mediacrawler": {"max_concurrency": 2, "sleep_sec": 0.5},
+    }
+
+    adapter = _build_adapter(cfg)
+
+    assert isinstance(adapter, MediaCrawlerAdapter)
+    assert adapter.max_concurrency == 2
+    assert adapter.sleep_sec == 0.5

@@ -49,7 +49,7 @@ class _RichBar:
 
 
 def _make_progress(console: Console) -> Progress:
-    # transient：跑完消失，不在滚动历史里留残条（历史叙事归 logging）
+    # 保留完成态：后一个任务新开一行，不覆盖前一个任务；结束后也留在终端历史里。
     return Progress(
         SpinnerColumn(),
         TextColumn("{task.description}"),
@@ -57,12 +57,16 @@ def _make_progress(console: Console) -> Progress:
         MofNCompleteColumn(),
         TimeElapsedColumn(),
         console=console,
-        transient=True,
+        transient=False,
     )
 
 
 def _default_console() -> Console:
     return Console(stderr=True)
+
+
+def _can_render(console: Console) -> bool:
+    return console.is_terminal and not console.is_dumb_terminal
 
 
 @contextmanager
@@ -72,7 +76,7 @@ def stage_bar(description: str, total: int, console: Console | None = None) -> I
     非 TTY 或 total<=0 时 yield 空实现。console 参数仅供测试注入。
     """
     console = console or _default_console()
-    if not console.is_terminal or total <= 0:
+    if not _can_render(console) or total <= 0:
         yield _NullBar()
         return
     with _make_progress(console) as progress:
@@ -82,29 +86,35 @@ def stage_bar(description: str, total: int, console: Console | None = None) -> I
 
 @contextmanager
 def creator_progress(
-    total: int, names: dict[str, str] | None = None, console: Console | None = None
+    total: int,
+    names: dict[str, str] | None = None,
+    notes_per_creator: int | None = None,
+    console: Console | None = None,
 ) -> Iterator[ProgressCallback | None]:
     """creator 单会话进度：yield 一个 adapter 进度事件回调（非 TTY 时 yield None）。
 
     事件约定（与 MediaCrawlerAdapter 的 emit 对应）：
       {"kind": "creator_start", "index": k, "user_id": id} → 第 k 个账号开始
-      {"kind": "note", "count": m} → 会话累计拉到第 m 条笔记
+      {"kind": "note", "count": m} → 当前账号拉到一条笔记（count 仅作兼容信息）
     names：account_id → 显示名（如 watchlist 昵称），缺省显示 user_id。
     """
     console = console or _default_console()
-    if not console.is_terminal or total <= 0:
+    if not _can_render(console) or total <= 0:
         yield None
         return
     with _make_progress(console) as progress:
         task_id = progress.add_task("创作者", total=total)
+        note_task_id = None
         state = {"label": "", "notes": 0}
 
         def on_progress(event: dict) -> None:
+            nonlocal note_task_id
             kind = event.get("kind")
             if kind == "creator_start":
                 index = event.get("index", 1)
                 user_id = event.get("user_id", "")
                 state["label"] = (names or {}).get(user_id) or user_id
+                state["notes"] = 0
                 # 第 k 个开始 = 前 k-1 个已完成
                 progress.update(
                     task_id,
@@ -112,13 +122,77 @@ def creator_progress(
                     description=f"创作者 {state['label']}",
                     refresh=True,
                 )
+                note_task_id = progress.add_task(
+                    f"{state['label']} 笔记 0",
+                    total=notes_per_creator,
+                )
             elif kind == "note":
-                state["notes"] = event.get("count", state["notes"] + 1)
+                if note_task_id is None:
+                    note_task_id = progress.add_task("笔记 0", total=notes_per_creator)
+                state["notes"] = state["notes"] + 1
                 progress.update(
-                    task_id,
-                    description=f"创作者 {state['label']} · 笔记 {state['notes']}",
+                    note_task_id,
+                    advance=1,
+                    description=f"{state['label']} 笔记 {state['notes']}",
                     refresh=True,
                 )
+            elif kind == "done":
+                progress.update(task_id, completed=total, refresh=True)
+
+        yield on_progress
+
+
+@contextmanager
+def search_progress(
+    total: int, notes_per_keyword: int | None = None, console: Console | None = None
+) -> Iterator[ProgressCallback | None]:
+    """search 单会话进度：父任务显示关键词序号，子任务显示当前关键词详情请求。"""
+    console = console or _default_console()
+    if not _can_render(console) or total <= 0:
+        yield None
+        return
+    with _make_progress(console) as rich_progress:
+        keyword_task_id = rich_progress.add_task("搜索关键词", total=total)
+        note_task_id = None
+        state = {"keyword": "", "notes": 0}
+
+        def on_progress(event: dict) -> None:
+            nonlocal note_task_id
+            kind = event.get("kind")
+            if kind == "keyword_start":
+                index = event.get("index", 1)
+                state["keyword"] = event.get("keyword", "")
+                state["notes"] = 0
+                rich_progress.update(
+                    keyword_task_id,
+                    completed=max(index - 1, 0),
+                    description=f"搜索「{state['keyword']}」",
+                    refresh=True,
+                )
+                note_task_id = rich_progress.add_task(
+                    f"{state['keyword']} 详情 0",
+                    total=notes_per_keyword,
+                )
+            elif kind == "page_start":
+                keyword = event.get("keyword") or state["keyword"]
+                page = event.get("page")
+                rich_progress.update(
+                    keyword_task_id,
+                    description=f"搜索「{keyword}」第 {page} 页",
+                    refresh=True,
+                )
+            elif kind == "note":
+                if note_task_id is None:
+                    note_task_id = rich_progress.add_task("详情 0", total=notes_per_keyword)
+                state["notes"] = state["notes"] + 1
+                rich_progress.update(
+                    note_task_id,
+                    advance=1,
+                    description=f"{state['keyword']} 详情 {state['notes']}",
+                    refresh=True,
+                )
+            elif kind == "done":
+                rich_progress.update(keyword_task_id, completed=total, refresh=True)
 
         yield on_progress
 
@@ -127,7 +201,7 @@ def creator_progress(
 def spinner(description: str, console: Console | None = None) -> Iterator[None]:
     """无进度语义的长等待（评论段用）：转圈提示。非 TTY 时无输出。"""
     console = console or _default_console()
-    if not console.is_terminal:
+    if not _can_render(console):
         yield
         return
     with console.status(description):

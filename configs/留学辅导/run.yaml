@@ -6,10 +6,12 @@ mediacrawler:
   cookies: ""
   out_dir: data/raw                        # 真实采集 raw 落此（gitignore）
   timeout: 600                             # 单次子进程上限秒数（搜索每词/creator 每账号各一次）
+  max_concurrency: 1                       # 保持单页面/单详情并发，降低风控概率
+  sleep_sec: 1.0                           # MC 默认 2s；真实采集耗时主要卡在详情 sleep
 keywords_file: configs/留学辅导/keywords.yaml     # 词表资产外置（与 inline keywords/synonyms 互斥）
 search:
   pages: 1
-  limit: 20
+  limit: 12
   sort: time_descending
   window_days: 30
 ranking:
@@ -24,7 +26,7 @@ watchlist:
   auto_top_n: 2
   max_total: 30   # 2026-07-03 用户拍板：上限由 10 提至 30（用量口径变更）
 creator:
-  notes_per_account: 10
+  notes_per_account: 6
 selection:
   top_notes_per_account: 2
   half_life_days: 14

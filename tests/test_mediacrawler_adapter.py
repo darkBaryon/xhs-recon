@@ -32,11 +32,38 @@ def test_build_command_has_compliance_flags(tmp_path):
     cmd = _adapter(tmp_path)._build_command("留学辅导", 1, 20, tmp_path / "run")
     assert cmd[cmd.index("--enable_ip_proxy") + 1] == "no"  # 关代理池
     assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"  # 单并发
+    assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "2.0"
     assert cmd[cmd.index("--get_comment") + 1] == "no"  # 禁评论（期2 不碰评论、不存敏感字段）
     assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
     assert cmd[cmd.index("--keywords") + 1] == "留学辅导"
     assert cmd[cmd.index("--type") + 1] == "search"
     assert "ENABLE_CDP" not in " ".join(cmd)  # CDP 用默认，不在命令里
+
+
+def test_build_search_command_joins_keywords_single_session(tmp_path):
+    cmd = _adapter(tmp_path)._build_search_command(
+        ["留学辅导", "essay辅导"],
+        1,
+        2,
+        20,
+        tmp_path / "search",
+    )
+
+    assert cmd[cmd.index("--type") + 1] == "search"
+    assert cmd[cmd.index("--keywords") + 1] == "留学辅导,essay辅导"
+    assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "40"
+    assert cmd[cmd.index("--start") + 1] == "1"
+    assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"
+
+
+def test_build_command_uses_configured_speed_controls(tmp_path):
+    cmd = _adapter(tmp_path, max_concurrency=2, sleep_sec=0.5)._build_command(
+        "留学辅导", 1, 12, tmp_path / "run"
+    )
+
+    assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "12"
+    assert cmd[cmd.index("--max_concurrency_num") + 1] == "2"
+    assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "0.5"
 
 
 def test_cookies_appended_only_when_set(tmp_path):
@@ -234,6 +261,7 @@ def test_build_creator_command_joins_ids_single_session(tmp_path):
     )
     assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "7"
     assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"  # 单并发不变
+    assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "2.0"
 
 
 def test_fetch_creator_notes_single_session_reads_combined_jsonl(tmp_path, monkeypatch):
@@ -312,10 +340,41 @@ def test_fetch_creator_notes_nonzero_exit_all_failed(tmp_path, monkeypatch, capl
 
     assert not r.ok
     assert r.notes == []
+    assert "exit 1" in r.error
     # 整会话失败：两个 id 都算失败
     assert "601d0481000000000101cc46" in r.error
     assert "602d0481000000000101cc47" in r.error
     assert "MediaCrawler 退出码 1" in caplog.text
+
+
+def test_fetch_creator_notes_nonzero_exit_summarizes_login_expired(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        return 1, "Traceback...\nDataFetchError: 登录已过期\nRetryError..."
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["601d0481000000000101cc46"], 2, "2026")
+
+    assert not r.ok
+    assert "exit 1: 登录已过期" in r.error
+
+
+def test_fetch_creator_notes_nonzero_exit_summarizes_captcha(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        return (
+            1,
+            "CAPTCHA appeared, request failed, Verifytype: 301, "
+            "Verifyuuid: abc, Response: <Response [461 status code 461]>",
+        )
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["601d0481000000000101cc46"], 2, "2026")
+
+    assert not r.ok
+    assert "exit 1: 触发验证码/风控：Verifytype: 301" in r.error
 
 
 def test_search_save_path_isolated_per_keyword_and_page(tmp_path):
@@ -342,6 +401,117 @@ def test_search_uses_isolated_save_path_in_command(tmp_path, monkeypatch):
     a.search("留学辅导", 1, 20, "2026-06-24T00:00:00Z")
     a.search("essay辅导", 1, 20, "2026-06-24T00:00:00Z")
     assert seen[0] != seen[1]
+
+
+def test_search_many_single_session_groups_by_source_keyword(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    commands = []
+    events = []
+    a.on_progress = events.append
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        commands.append(cmd)
+        assert on_line is not None
+        for line in [
+            "[XiaoHongShuCrawler.search] Current search keyword: 留学辅导\n",
+            "[XiaoHongShuCrawler.search] search Xiaohongshu keyword: 留学辅导, page: 1\n",
+            "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+            "[XiaoHongShuCrawler.search] Current search keyword: essay辅导\n",
+            "[XiaoHongShuCrawler.search] search Xiaohongshu keyword: essay辅导, page: 1\n",
+            "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
+        ]:
+            on_line(line)
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_contents_2026.jsonl").write_text(
+            "\n".join(
+                [
+                    (
+                        '{"note_id":"n1","user_id":"u1","nickname":"机构A",'
+                        '"source_keyword":"留学辅导"}'
+                    ),
+                    (
+                        '{"note_id":"n2","user_id":"u2","nickname":"机构B",'
+                        '"source_keyword":"essay辅导"}'
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return 0, "search stdout"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    results = a.search_many(["留学辅导", "essay辅导"], 1, 20, "2026")
+
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("--keywords") + 1] == "留学辅导,essay辅导"
+    assert [r.keyword for r in results] == ["留学辅导", "essay辅导"]
+    assert [r.notes[0].note_id for r in results] == ["n1", "n2"]
+    assert [r.accounts[0].account_id for r in results] == ["u1", "u2"]
+    assert Path(results[0].raw_path, "mediacrawler.log").read_text(encoding="utf-8") == (
+        "search stdout"
+    )
+    assert events == [
+        {"kind": "keyword_start", "index": 1, "keyword": "留学辅导"},
+        {"kind": "page_start", "keyword": "留学辅导", "page": 1},
+        {"kind": "note", "count": 1},
+        {"kind": "keyword_start", "index": 2, "keyword": "essay辅导"},
+        {"kind": "page_start", "keyword": "essay辅导", "page": 1},
+        {"kind": "note", "count": 1},
+        {"kind": "done"},
+    ]
+
+
+def test_search_many_nonzero_salvages_completed_keyword(tmp_path, monkeypatch, caplog):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_contents_2026.jsonl").write_text(
+            '{"note_id":"n1","user_id":"u1","source_keyword":"留学辅导"}',
+            encoding="utf-8",
+        )
+        return 1, "detail failed"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    with caplog.at_level(logging.WARNING):
+        results = a.search_many(["留学辅导", "essay辅导"], 1, 20, "2026")
+
+    assert results[0].ok
+    assert results[0].notes[0].note_id == "n1"
+    assert not results[1].ok
+    assert "exit 1" in results[1].error
+    assert "no notes parsed" in results[1].error
+    assert "MediaCrawler 退出码 1" in caplog.text
+
+
+def test_search_many_empty_keyword_reports_detail_failures(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        assert on_line is not None
+        for line in [
+            "[XiaoHongShuCrawler.search] Current search keyword: 论文修改润色\n",
+            (
+                "[XiaoHongShuCrawler.get_note_detail_async_task] "
+                "Failed to get note detail, note_id: n1, api_error: empty response\n"
+            ),
+            "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+            ("[XiaoHongShuCrawler.get_note_detail_async_task] Failed to get note detail, Id: n2\n"),
+            "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
+        ]:
+            on_line(line)
+        return 0, "search stdout"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    results = a.search_many(["论文修改润色"], 1, 12, "2026")
+
+    assert not results[0].ok
+    assert "detail failed 2/2 candidates" in results[0].error
+    assert "no notes parsed from output" in results[0].error
 
 
 def test_search_corrupt_jsonl_is_error_not_crash(tmp_path, monkeypatch):
@@ -507,11 +677,11 @@ def test_run_crawler_timeout_kills_and_keeps_partial_output(tmp_path):
 
 MC_CREATOR_LINES = [
     "[XiaoHongShuCrawler.get_creators_and_notes] Parse creator URL info: user_id='aaa'\n",
-    "[get_note_detail_async_task] Begin get note detail, note_id: n1\n",
-    "[get_note_detail_async_task] Begin get note detail, note_id: n2\n",
+    "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+    "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
     "some unrelated log line\n",
     "[XiaoHongShuCrawler.get_creators_and_notes] Parse creator URL info: user_id='bbb'\n",
-    "[get_note_detail_async_task] Begin get note detail, note_id: n3\n",
+    "[get_note_detail_async_task] Finish get note detail, note_id: n3\n",
 ]
 
 
@@ -543,6 +713,7 @@ def test_creator_progress_events_from_mc_output(tmp_path, monkeypatch):
         {"kind": "note", "count": 2},
         {"kind": "creator_start", "index": 2, "user_id": "bbb"},
         {"kind": "note", "count": 3},
+        {"kind": "done"},
     ]
 
 

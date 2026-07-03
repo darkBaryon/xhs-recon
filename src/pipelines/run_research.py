@@ -61,6 +61,8 @@ def _build_adapter(config: dict) -> ResearchAdapter:
                 cookies=mc.get("cookies", ""),
                 sort_type=search_cfg.get("sort", ""),
                 max_notes=search_cfg.get("limit", 20),
+                max_concurrency=mc.get("max_concurrency", 1),
+                sleep_sec=mc.get("sleep_sec", 2.0),
                 timeout=mc.get("timeout", 600),
             )
         # creator_fixture_path is fixture-provider only; MediaCrawler mode must use
@@ -152,6 +154,18 @@ def _resolve_config_refs(config: dict) -> dict:
     return config
 
 
+def _manual_watch_account(entry) -> tuple[str, str]:
+    if isinstance(entry, str):
+        return normalize_creator_ref(entry), ""
+    if isinstance(entry, dict):
+        ref = entry.get("account_id") or entry.get("id") or entry.get("url") or entry.get("ref")
+        if not ref:
+            raise ValueError(f"watchlist.manual 条目缺少 account_id/id/url/ref：{entry}")
+        nickname = str(entry.get("nickname") or entry.get("name") or "").strip()
+        return normalize_creator_ref(str(ref)), nickname
+    raise ValueError(f"invalid creator ref: {entry}")
+
+
 class SyncArtifacts(BaseModel):
     """watchlist 同步段产物（组装层私有载体，不进 models.py）。"""
 
@@ -166,7 +180,7 @@ class SyncArtifacts(BaseModel):
 def _search_stage(
     config: dict, adapter: ResearchAdapter, collected_at: str
 ) -> tuple[list[Note], list[Account], list[AccountRank]]:
-    """搜索段：关键词扩展 → 逐词搜索 → 时间窗过滤 → 聚合去重 → 账号打分。"""
+    """搜索段：关键词扩展 → 搜索采集 → 时间窗过滤 → 聚合去重 → 账号打分。"""
     keywords = expand_keywords(config.get("keywords", []), config.get("synonyms"))
     logger.info("关键词扩展：%d 个（%s）", len(keywords), " / ".join(keywords))
     search_cfg = config.get("search", {})
@@ -175,24 +189,48 @@ def _search_stage(
     window_days = search_cfg.get("window_days", 0)
 
     results = []
-    with progress.stage_bar("搜索", total=len(keywords) * pages) as bar:
-        for kw in keywords:
-            for page in range(1, pages + 1):
-                bar.describe(f"搜索「{kw}」")
-                t0 = perf_counter()
-                result = adapter.search(kw, page, limit, collected_at)
-                dt = perf_counter() - t0
-                bar.advance()
-                log_result(logger, result)
-                logger.info(
-                    "搜索「%s」第 %d 页：笔记 %d · 账号 %d · %.1fs",
-                    kw,
-                    page,
-                    len(result.notes),
-                    len(result.accounts),
-                    dt,
-                )
-                results.append(result)
+    search_many = getattr(adapter, "search_many", None)
+    if callable(search_many):
+        notes_per_keyword = max(limit or 20, 1) * max(pages, 1)
+        t0 = perf_counter()
+        with progress.search_progress(len(keywords), notes_per_keyword) as on_progress:
+            if on_progress is not None and hasattr(adapter, "on_progress"):
+                adapter.on_progress = on_progress
+            try:
+                results = search_many(keywords, pages, limit, collected_at)
+            finally:
+                if hasattr(adapter, "on_progress"):
+                    adapter.on_progress = None
+        dt = perf_counter() - t0
+        for result in results:
+            log_result(logger, result)
+            logger.info(
+                "搜索「%s」：详情成功 %d/%d · 账号 %d",
+                result.keyword,
+                len(result.notes),
+                notes_per_keyword,
+                len(result.accounts),
+            )
+        logger.info("搜索单会话：%d 个关键词 · %.1fs", len(keywords), dt)
+    else:
+        with progress.stage_bar("搜索", total=len(keywords) * pages) as bar:
+            for kw in keywords:
+                for page in range(1, pages + 1):
+                    bar.describe(f"搜索「{kw}」")
+                    t0 = perf_counter()
+                    result = adapter.search(kw, page, limit, collected_at)
+                    dt = perf_counter() - t0
+                    bar.advance()
+                    log_result(logger, result)
+                    logger.info(
+                        "搜索「%s」第 %d 页：笔记 %d · 账号 %d · %.1fs",
+                        kw,
+                        page,
+                        len(result.notes),
+                        len(result.accounts),
+                        dt,
+                    )
+                    results.append(result)
 
     results = _apply_time_window(results, window_days, collected_at)
     notes, accounts = aggregate(results)
@@ -211,14 +249,22 @@ def _sync_stage(
         return SyncArtifacts()
 
     try:
-        manual_ids = [normalize_creator_ref(ref) for ref in watchlist_cfg.get("manual", [])]
+        manual_accounts = [
+            _manual_watch_account(entry) for entry in watchlist_cfg.get("manual", [])
+        ]
     except ValueError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1) from e
+    manual_ids = [account_id for account_id, _ in manual_accounts]
+    manual_nicknames = {
+        account_id: nickname for account_id, nickname in manual_accounts if nickname
+    }
 
     auto_top_n = watchlist_cfg.get("auto_top_n", 0)
     max_total = watchlist_cfg.get("max_total", 10)
-    watchlist = build_watchlist(ranks, manual_ids, auto_top_n, max_total)
+    watchlist = build_watchlist(
+        ranks, manual_ids, auto_top_n, max_total, manual_nicknames=manual_nicknames
+    )
     auto_count = sum(1 for account in watchlist if account.source == "auto")
     logger.info(
         "watchlist：manual %d · auto %d/%d · total %d",
@@ -236,7 +282,11 @@ def _sync_stage(
         # 回调；非 TTY 时 creator_progress 直接给 None，adapter 零回调开销
         names = {wa.account_id: wa.nickname or wa.account_id for wa in watchlist}
         try:
-            with progress.creator_progress(len(watchlist), names) as on_progress:
+            with progress.creator_progress(
+                len(watchlist),
+                names,
+                notes_per_creator=creator_cfg.get("notes_per_account", 10),
+            ) as on_progress:
                 if on_progress is not None and hasattr(adapter, "on_progress"):
                     adapter.on_progress = on_progress
                 try:

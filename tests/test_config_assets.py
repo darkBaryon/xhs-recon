@@ -114,3 +114,42 @@ def test_pipeline_with_asset_files(tmp_path):
     assert [r["account_id"] for r in rows] == ["601d0481000000000101cc46"]  # 资产文件 manual 生效
     assert rows[0]["source"] == "manual"
     assert Path(paths["creator_notes"]).exists()
+
+
+def test_watchlist_file_manual_object_exports_nickname(tmp_path):
+    kf = _write_yaml(tmp_path / "kw.yaml", {"keywords": ["留学辅导"]})
+    wf = _write_yaml(
+        tmp_path / "wl.yaml",
+        {
+            "manual": [
+                {
+                    "account_id": "601d0481000000000101cc46",
+                    "nickname": "手写昵称",
+                }
+            ]
+        },
+    )
+    cfg_path = _write_yaml(
+        tmp_path / "cfg.yaml",
+        {
+            "provider": "fixture",
+            "fixture_path": "tests/fixtures/search_contents_sample.jsonl",
+            "creator_fixture_path": "tests/fixtures/creator_contents_sample.jsonl",
+            "keywords_file": kf,
+            "watchlist_file": wf,
+            "watchlist": {"auto_top_n": 0, "max_total": 5},
+            "creator": {"notes_per_account": 3},
+            "search": {"pages": 1, "limit": 20, "sort": "", "window_days": 0},
+            "logging": {"file_enabled": False},
+            "export": {"out_dir": str(tmp_path / "exports")},
+        },
+    )
+
+    paths = run_research(cfg_path)
+
+    rows = list(csv.DictReader(open(paths["watchlist"], encoding="utf-8")))
+    assert rows[0] == {
+        "account_id": "601d0481000000000101cc46",
+        "nickname": "手写昵称",
+        "source": "manual",
+    }

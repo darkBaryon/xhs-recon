@@ -1,6 +1,6 @@
 """期2 适配器：命令行触发 MediaCrawler 采集 → 读回 JSONL → 复用 parsers。
 
-合规（个人自用）：关代理池（--enable_ip_proxy no）、单并发（--max_concurrency_num 1）；
+合规（个人自用）：关代理池（--enable_ip_proxy no）、默认单并发（--max_concurrency_num 1）；
 CDP 用 MediaCrawler 默认（本机真实浏览器，不伪造身份）。真实采集需 MediaCrawler 的
 Playwright 环境与登录态，不进 CI。
 """
@@ -29,13 +29,30 @@ ProgressCallback = Callable[[dict], None]
 
 # MediaCrawler creator 会话的进度标记（已在真实 mediacrawler.log 验证格式）：
 # 每处理一个账号打一行 "Parse creator URL info: user_id='...'"，
-# 每拉一条笔记打一行 "Begin get note detail, note_id: ..."
+# 每完成一条笔记详情打一行 "Finish get note detail, note_id: ..."
 _RE_CREATOR_START = re.compile(r"Parse creator URL info: .*?user_id='([^']*)'")
-_RE_NOTE_DETAIL = re.compile(r"Begin get note detail, note_id")
+_RE_SEARCH_KEYWORD_START = re.compile(r"Current search keyword: (.+)")
+_RE_SEARCH_PAGE_START = re.compile(r"search Xiaohongshu keyword: (.*), page: (\d+)")
+_RE_CAPTCHA = re.compile(r"CAPTCHA appeared, request failed, ([^\n]+)")
+_RE_DATA_FETCH_ERROR = re.compile(r"DataFetchError: (.+)")
+_RE_NOTE_DETAIL_DONE = re.compile(r"Finish get note detail, note_id")
+_RE_NOTE_DETAIL_FAILED = re.compile(r"Failed to get note detail,\s*(?:Id|note_id):\s*([^,\s]+)")
 
 
 def _safe_dirname(s: str) -> str:
     return re.sub(r"[^0-9A-Za-z]", "-", s) or "run"
+
+
+def _summarize_crawler_failure(output: str) -> str:
+    captcha_matches = _RE_CAPTCHA.findall(output)
+    if captcha_matches:
+        return f"触发验证码/风控：{captcha_matches[-1].strip()}"
+    if "登录已过期" in output:
+        return "登录已过期"
+    matches = _RE_DATA_FETCH_ERROR.findall(output)
+    if matches:
+        return matches[-1].strip()
+    return output[-300:]
 
 
 class MediaCrawlerAdapter(ResearchAdapter):
@@ -43,6 +60,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
 
     # 单会话 creator 超时按账号数缩放的每账号预算（秒）：实测 ~60s/账号(10 篇)，留余量
     _CREATOR_PER_ACCOUNT_SEC = 120
+    # 单会话 search 超时按关键词×页缩放；每页 20 条，MC 默认每条详情后 sleep 2s
+    _SEARCH_PER_KEYWORD_PAGE_SEC = 120
 
     def __init__(
         self,
@@ -53,6 +72,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         cookies: str = "",
         sort_type: str = "",
         max_notes: int = 20,
+        max_concurrency: int = 1,
+        sleep_sec: float = 2.0,
         timeout: int = 600,
         launcher: list[str] | None = None,
     ):
@@ -63,6 +84,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self.cookies = cookies
         self.sort_type = sort_type
         self.max_notes = max_notes
+        self.max_concurrency = max_concurrency
+        self.sleep_sec = sleep_sec
         self.timeout = timeout
         # MediaCrawler 以 uv 管理（有 uv.lock/pyproject）；用其环境跑以带上 Playwright。
         # 可配以免硬依赖 uv（如换成其 .venv 的 python）。
@@ -81,7 +104,15 @@ class MediaCrawlerAdapter(ResearchAdapter):
         slug = re.sub(r"[^\w]+", "-", keyword)[:20] or "kw"
         return self._save_path(collected_at) / f"search-{slug}-p{page}-{digest}"
 
-    def _build_command(self, keyword: str, page: int, limit: int, save_path: Path) -> list[str]:
+    def _search_session_save_path(self, collected_at: str) -> Path:
+        return self._save_path(collected_at) / "search"
+
+    def _build_search_command(
+        self, keywords: list[str], start_page: int, pages: int, limit: int, save_path: Path
+    ) -> list[str]:
+        # MC 的 --keywords 支持逗号分隔；内部在同一个 browser/page 会话里顺序循环。
+        # 小红书搜索页固定最多 20 条/页；MediaCrawler 会按 limit 截断详情采集。
+        crawler_max_notes = max(limit or self.max_notes, 1) * max(pages, 1)
         cmd = [
             *self.launcher,
             "main.py",
@@ -90,7 +121,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "--type",
             "search",
             "--keywords",
-            keyword,
+            ",".join(keywords),
             "--lt",
             self.login_type,
             "--save_data_option",
@@ -104,17 +135,22 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "--get_sub_comment",
             "no",
             "--max_concurrency_num",
-            "1",
+            str(self.max_concurrency),
             "--crawler_max_notes_count",
-            str(limit or self.max_notes),
+            str(crawler_max_notes),
+            "--crawler_max_sleep_sec",
+            str(self.sleep_sec),
             "--start",
-            str(page),
+            str(start_page),
         ]
         if self.cookies:
             cmd += ["--cookies", self.cookies]
         if self.sort_type:
             cmd += ["--sort_type", self.sort_type]
         return cmd
+
+    def _build_command(self, keyword: str, page: int, limit: int, save_path: Path) -> list[str]:
+        return self._build_search_command([keyword], page, 1, limit, save_path)
 
     def _build_comments_command(self, urls: list[str], limit: int, save_path: Path) -> list[str]:
         cmd = [
@@ -139,7 +175,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "--enable_ip_proxy",
             "no",
             "--max_concurrency_num",
-            "1",
+            str(self.max_concurrency),
+            "--crawler_max_sleep_sec",
+            str(self.sleep_sec),
             "--lt",
             self.login_type,
         ]
@@ -151,7 +189,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self, account_ids: list[str], limit: int, save_path: Path
     ) -> list[str]:
         # 单会话多账号：--creator_id 接受逗号分隔列表，MC 在一次会话里顺序拉完
-        # （省掉逐账号的浏览器启动开销）；--max_concurrency_num 1 保持单并发不变，
+        # （省掉逐账号的浏览器启动开销）；默认 --max_concurrency_num 1 保持单并发，
         # 会话内仍按 CRAWLER_MAX_SLEEP_SEC 间隔请求，速率不放大（合规红线不动）。
         cmd = [
             *self.launcher,
@@ -175,9 +213,11 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "--get_sub_comment",
             "no",
             "--max_concurrency_num",
-            "1",
+            str(self.max_concurrency),
             "--crawler_max_notes_count",
             str(limit or self.max_notes),
+            "--crawler_max_sleep_sec",
+            str(self.sleep_sec),
         ]
         if self.cookies:
             cmd += ["--cookies", self.cookies]
@@ -240,6 +280,22 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return parse_jsonl_lines(
             lines, keyword=keyword, collected_at=collected_at, raw_path=str(save_path)
         )
+
+    def _read_search_results_by_keyword(
+        self, save_path: Path, keywords: list[str], collected_at: str
+    ) -> dict[str, tuple[list[Note], list[Account]]]:
+        notes, accounts = self._read_results(save_path, "", collected_at)
+        keyword_set = set(keywords)
+        buckets: dict[str, tuple[list[Note], list[Account]]] = {
+            keyword: ([], []) for keyword in keywords
+        }
+        for note, account in zip(notes, accounts, strict=False):
+            keyword = note.source_keywords[0] if note.source_keywords else ""
+            if keyword not in keyword_set:
+                continue
+            buckets[keyword][0].append(note)
+            buckets[keyword][1].append(account)
+        return buckets
 
     def _read_comments(self, save_path: Path, collected_at: str):
         files = sorted(Path(save_path).glob("xhs/jsonl/*_comments_*.jsonl"))
@@ -328,6 +384,142 @@ class MediaCrawlerAdapter(ResearchAdapter):
             command=" ".join(cmd),
         )
 
+    def _search_progress_parser(
+        self, stats: dict[str, dict[str, int]] | None = None
+    ) -> Callable[[str], None]:
+        """逐行解析 MC search 会话输出 → 语义事件。"""
+        counts = {"keyword": 0, "note": 0}
+        current_keyword: str | None = None
+
+        def handle(line: str) -> None:
+            nonlocal current_keyword
+            m = _RE_SEARCH_KEYWORD_START.search(line)
+            if m:
+                current_keyword = m.group(1).strip()
+                counts["keyword"] += 1
+                counts["note"] = 0
+                if stats is not None:
+                    stats.setdefault(current_keyword, {"processed": 0, "failed": 0})
+                self._emit(
+                    {
+                        "kind": "keyword_start",
+                        "index": counts["keyword"],
+                        "keyword": current_keyword,
+                    }
+                )
+                return
+
+            m = _RE_SEARCH_PAGE_START.search(line)
+            if m:
+                self._emit(
+                    {
+                        "kind": "page_start",
+                        "keyword": m.group(1).strip(),
+                        "page": int(m.group(2)),
+                    }
+                )
+                return
+
+            if _RE_NOTE_DETAIL_DONE.search(line):
+                counts["note"] += 1
+                if current_keyword and stats is not None:
+                    stats.setdefault(current_keyword, {"processed": 0, "failed": 0})[
+                        "processed"
+                    ] += 1
+                self._emit({"kind": "note", "count": counts["note"]})
+                return
+
+            if _RE_NOTE_DETAIL_FAILED.search(line) and current_keyword and stats is not None:
+                stats.setdefault(current_keyword, {"processed": 0, "failed": 0})["failed"] += 1
+
+        return handle
+
+    def search_many(
+        self, keywords: list[str], pages: int, limit: int, collected_at: str
+    ) -> list[FetchResult]:
+        """单会话搜索多个关键词；MC 内部顺序处理，不放大并发。"""
+        if not keywords:
+            return []
+
+        save_path = self._search_session_save_path(collected_at)
+        cmd = self._build_search_command(keywords, 1, pages, limit, save_path)
+        session_timeout = max(
+            self.timeout,
+            self._SEARCH_PER_KEYWORD_PAGE_SEC * len(keywords) * max(pages, 1),
+        )
+        detail_stats: dict[str, dict[str, int]] = {}
+        on_line = self._search_progress_parser(detail_stats)
+
+        rc: int | None = None
+        out = ""
+        run_error: str | None = None
+        try:
+            rc, out = self._run_crawler(cmd, timeout=session_timeout, on_line=on_line)
+            self._write_crawler_log(save_path, out)
+            if rc == 0:
+                self._emit({"kind": "done"})
+        except subprocess.TimeoutExpired as e:
+            run_error = f"session timed out after {session_timeout}s"
+            out = e.output or ""
+            self._write_crawler_log(save_path, f"{run_error}\n{out}")
+            logger.warning("MediaCrawler search 会话超时 %ds，抢救已落盘部分", session_timeout)
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+            run_error = f"run failed: {e}"
+            self._write_crawler_log(save_path, run_error)
+
+        if rc not in (0, None):
+            logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
+
+        try:
+            buckets = self._read_search_results_by_keyword(save_path, keywords, collected_at)
+        except (OSError, ValueError) as e:
+            return [
+                self._err(
+                    keyword,
+                    None,
+                    collected_at,
+                    cmd,
+                    f"read results failed: {e}",
+                    save_path,
+                )
+                for keyword in keywords
+            ]
+
+        results: list[FetchResult] = []
+        for keyword in keywords:
+            notes, accounts = buckets[keyword]
+            error_parts = []
+            if run_error:
+                error_parts.append(run_error)
+            if rc not in (0, None) and not notes:
+                error_parts.append(f"exit {rc}: {out[-300:]}")
+            if not notes:
+                stats = detail_stats.get(keyword, {})
+                failed = stats.get("failed", 0)
+                processed = stats.get("processed", 0)
+                if failed:
+                    error_parts.append(
+                        f"detail failed {failed}/{processed or failed} candidates; "
+                        "no notes parsed from output"
+                    )
+                else:
+                    error_parts.append("no notes parsed from output")
+            results.append(
+                FetchResult(
+                    provider=self.provider_name,
+                    operation="search",
+                    collected_at=collected_at,
+                    keyword=keyword,
+                    page=None,
+                    notes=notes,
+                    accounts=accounts,
+                    raw_path=str(save_path),
+                    error="; ".join(error_parts) or None,
+                    command=" ".join(cmd),
+                )
+            )
+        return results
+
     def fetch_comments(
         self, notes: list[TypicalNote], limit: int, collected_at: str
     ) -> FetchResult:
@@ -407,7 +599,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
                 self._emit(
                     {"kind": "creator_start", "index": counts["creator"], "user_id": m.group(1)}
                 )
-            elif _RE_NOTE_DETAIL.search(line):
+            elif _RE_NOTE_DETAIL_DONE.search(line):
                 counts["note"] += 1
                 self._emit({"kind": "note", "count": counts["note"]})
 
@@ -426,13 +618,17 @@ class MediaCrawlerAdapter(ResearchAdapter):
 
         on_line = self._creator_progress_parser() if self.on_progress else None
         rc: int | None = None
+        out = ""
         run_error: str | None = None
         try:
             rc, out = self._run_crawler(cmd, timeout=session_timeout, on_line=on_line)
             self._write_crawler_log(save_path, out)
+            if rc == 0:
+                self._emit({"kind": "done"})
         except subprocess.TimeoutExpired as e:
             run_error = f"session timed out after {session_timeout}s"
-            self._write_crawler_log(save_path, f"{run_error}\n{e.output or ''}")
+            out = e.output or ""
+            self._write_crawler_log(save_path, f"{run_error}\n{out}")
             logger.warning("MediaCrawler creator 会话超时 %ds，抢救已落盘部分", session_timeout)
         except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
             run_error = f"run failed: {e}"
@@ -464,6 +660,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         error_parts = []
         if run_error:
             error_parts.append(run_error)
+        if rc not in (0, None):
+            error_parts.append(f"exit {rc}: {_summarize_crawler_failure(out)}")
         if failed_ids:
             error_parts.append(f"creator fetch failed: {','.join(failed_ids)}")
         error = "; ".join(error_parts) or None
