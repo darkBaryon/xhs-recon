@@ -30,6 +30,9 @@ def _safe_dirname(s: str) -> str:
 class MediaCrawlerAdapter(ResearchAdapter):
     provider_name = "mediacrawler"
 
+    # 单会话 creator 超时按账号数缩放的每账号预算（秒）：实测 ~60s/账号(10 篇)，留余量
+    _CREATOR_PER_ACCOUNT_SEC = 120
+
     def __init__(
         self,
         mediacrawler_dir: str,
@@ -167,15 +170,15 @@ class MediaCrawlerAdapter(ResearchAdapter):
             cmd += ["--cookies", self.cookies]
         return cmd
 
-    def _run_crawler(self, cmd: list[str]) -> tuple[int, str]:
-        """实跑 MediaCrawler；单测注入此点以避免真实采集。"""
+    def _run_crawler(self, cmd: list[str], timeout: int | None = None) -> tuple[int, str]:
+        """实跑 MediaCrawler；单测注入此点以避免真实采集。timeout 缺省用构造值。"""
         p = subprocess.run(
             cmd,
             cwd=self.mediacrawler_dir,
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=self.timeout,
+            timeout=timeout or self.timeout,
         )
         return p.returncode, (p.stdout + p.stderr)
 
@@ -343,37 +346,36 @@ class MediaCrawlerAdapter(ResearchAdapter):
         # 合并落盘（一个 save_path），notes/profiles 各行自带 user_id 可区分。
         save_path = self._save_path(collected_at) / "creator"
         cmd = self._build_creator_command(account_ids, limit, save_path)
+        # 超时按账号数缩放：一个会话拉 N 账号，固定 600s 对大 watchlist 不够
+        session_timeout = max(self.timeout, self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
         t0 = perf_counter()
 
+        rc: int | None = None
+        run_error: str | None = None
         try:
-            rc, out = self._run_crawler(cmd)
+            rc, out = self._run_crawler(cmd, timeout=session_timeout)
+            self._write_crawler_log(save_path, out)
+        except subprocess.TimeoutExpired as e:
+            run_error = f"session timed out after {session_timeout}s"
+            self._write_crawler_log(save_path, f"{run_error}\n{e.output or ''}")
+            logger.warning("MediaCrawler creator 会话超时 %ds，抢救已落盘部分", session_timeout)
         except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
-            self._write_crawler_log(save_path, f"run failed: {e}")
-            return self._err(
-                None,
-                None,
-                collected_at,
-                cmd,
-                f"run failed: {e}",
-                save_path,
-                operation="creator_notes",
-            )
-        self._write_crawler_log(save_path, out)
+            run_error = f"run failed: {e}"
+            self._write_crawler_log(save_path, run_error)
 
+        # 无论成功/超时/非零退出：都读已落盘部分——MC 逐条写盘，超时前完成的账号可抢救
         notes: list[Note] = []
         accounts: list[Account] = []
         profiles: list[CreatorProfile] = []
-        if rc == 0:
-            try:
-                notes, accounts = self._read_creator_results(save_path, collected_at)
-                profiles = self._read_creator_profiles(save_path, collected_at)
-            except (OSError, ValueError) as e:
-                self._write_crawler_log(save_path, f"read creator failed: {e}")
-        else:
+        try:
+            notes, accounts = self._read_creator_results(save_path, collected_at)
+            profiles = self._read_creator_profiles(save_path, collected_at)
+        except (OSError, ValueError) as e:
+            self._write_crawler_log(save_path, f"read creator failed: {e}")
+        if rc not in (0, None):
             logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
 
         # 失败判定（单会话下无逐账号退出码）：请求的 id 在结果里既无笔记又无档案 = 失败。
-        # 会话内单账号失败 MC 自身 try/except continue，其余账号照常落盘。
         got = {n.account_id for n in notes} | {p.account_id for p in profiles}
         failed_ids = [aid for aid in account_ids if aid not in got]
         logger.debug(
@@ -384,7 +386,12 @@ class MediaCrawlerAdapter(ResearchAdapter):
             perf_counter() - t0,
         )
 
-        error = f"creator fetch failed: {','.join(failed_ids)}" if failed_ids else None
+        error_parts = []
+        if run_error:
+            error_parts.append(run_error)
+        if failed_ids:
+            error_parts.append(f"creator fetch failed: {','.join(failed_ids)}")
+        error = "; ".join(error_parts) or None
         return FetchResult(
             provider=self.provider_name,
             operation="creator_notes",

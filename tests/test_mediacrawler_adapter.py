@@ -52,7 +52,7 @@ def test_search_success_reads_and_parses(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
     sample = Path(SAMPLE).read_text(encoding="utf-8")
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -71,7 +71,7 @@ def test_search_replacement_character_output_still_parses(tmp_path, monkeypatch)
     a = _adapter(tmp_path)
     sample = Path(SAMPLE).read_text(encoding="utf-8")
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -147,7 +147,7 @@ def test_fetch_comments_builds_detail_command_and_reads_jsonl(tmp_path, monkeypa
     a = _adapter(tmp_path)
     commands = []
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         commands.append(cmd)
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
@@ -238,7 +238,7 @@ def test_fetch_creator_notes_single_session_reads_combined_jsonl(tmp_path, monke
     fixture_lines = Path(CREATOR).read_text(encoding="utf-8").splitlines()
     commands = []
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         commands.append(cmd)
         # 单会话：一次调用写请求账号到同一个 jsonl（MC 只拉 --creator_id 列出的账号）
         wanted = cmd[cmd.index("--creator_id") + 1].split(",")
@@ -275,7 +275,7 @@ def test_fetch_creator_notes_missing_account_marked_failed(tmp_path, monkeypatch
     present_id = "601d0481000000000101cc46"
     missing_id = "602d0481000000000101cc47"
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -296,7 +296,7 @@ def test_fetch_creator_notes_missing_account_marked_failed(tmp_path, monkeypatch
 def test_fetch_creator_notes_nonzero_exit_all_failed(tmp_path, monkeypatch, caplog):
     a = _adapter(tmp_path)
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         return 1, "creator session boom"
 
     monkeypatch.setattr(a, "_run_crawler", fake_run)
@@ -330,7 +330,7 @@ def test_search_save_path_isolated_per_keyword_and_page(tmp_path):
 def test_search_uses_isolated_save_path_in_command(tmp_path, monkeypatch):
     seen = []
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         seen.append(Path(cmd[cmd.index("--save_data_path") + 1]))
         return 1, "boom"  # 直接失败即可，只看命令
 
@@ -344,7 +344,7 @@ def test_search_uses_isolated_save_path_in_command(tmp_path, monkeypatch):
 def test_search_corrupt_jsonl_is_error_not_crash(tmp_path, monkeypatch):
     """B2：读回坏行进 error（与 comments/creator 同口径），不穿透崩管线。"""
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -365,7 +365,7 @@ def test_creator_reads_profiles_when_present(tmp_path, monkeypatch):
         ' "tag_list": "{\\"profession\\": \\"教育\\"}"}'
     )
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -385,7 +385,7 @@ def test_creator_reads_profiles_when_present(tmp_path, monkeypatch):
 def test_creator_missing_profiles_file_degrades_empty(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -398,3 +398,44 @@ def test_creator_missing_profiles_file_degrades_empty(tmp_path, monkeypatch):
     r = a.fetch_creator_notes(["aaaa"], 5, "2026")
     assert r.profiles == []  # 软降级，不入 error
     assert r.ok
+
+
+def test_fetch_creator_notes_timeout_salvages_partial(tmp_path, monkeypatch):
+    """单会话超时：已落盘的账号要抢救回来，只有没跑完的算失败。"""
+    import subprocess as sp_mod
+
+    a = _adapter(tmp_path)
+    fixture_lines = Path(CREATOR).read_text(encoding="utf-8").splitlines()
+    done_id = "601d0481000000000101cc46"
+    timeout_id = "602d0481000000000101cc47"
+
+    def fake_run(cmd, timeout=None):
+        # 模拟：跑到一半超时——done_id 已落盘，然后抛 TimeoutExpired
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        lines = [ln for ln in fixture_lines if f'"user_id": "{done_id}"' in ln]
+        (d / "creator_contents_2026-07-02.jsonl").write_text("\n".join(lines), encoding="utf-8")
+        raise sp_mod.TimeoutExpired(cmd, timeout or 600)
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes([done_id, timeout_id], 2, "2026-07-02T00:00:00Z")
+
+    assert {n.account_id for n in r.notes} == {done_id}  # 已落盘账号抢救成功
+    assert not r.ok
+    assert "timed out" in r.error
+    assert timeout_id in r.error  # 没跑完的算失败
+
+
+def test_creator_session_timeout_scales_with_account_count(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    seen_timeout = []
+
+    def fake_run(cmd, timeout=None):
+        seen_timeout.append(timeout)
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    a.fetch_creator_notes([f"{i:024d}" for i in range(20)], 10, "2026")
+    # 20 账号 × 120s = 2400s，远大于默认 600
+    assert seen_timeout[0] == 20 * a._CREATOR_PER_ACCOUNT_SEC
