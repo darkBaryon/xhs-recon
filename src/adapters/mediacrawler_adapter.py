@@ -9,6 +9,8 @@ import hashlib
 import logging
 import re
 import subprocess
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
@@ -21,6 +23,15 @@ from src.core.ports import ResearchAdapter
 from src.models import Account, CreatorProfile, FetchResult, Note, TypicalNote
 
 logger = logging.getLogger(__name__)
+
+# adapter 进度事件的消费端类型（pipeline 注入；adapter 不 import 显示层）
+ProgressCallback = Callable[[dict], None]
+
+# MediaCrawler creator 会话的进度标记（已在真实 mediacrawler.log 验证格式）：
+# 每处理一个账号打一行 "Parse creator URL info: user_id='...'"，
+# 每拉一条笔记打一行 "Begin get note detail, note_id: ..."
+_RE_CREATOR_START = re.compile(r"Parse creator URL info: .*?user_id='([^']*)'")
+_RE_NOTE_DETAIL = re.compile(r"Begin get note detail, note_id")
 
 
 def _safe_dirname(s: str) -> str:
@@ -56,6 +67,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         # MediaCrawler 以 uv 管理（有 uv.lock/pyproject）；用其环境跑以带上 Playwright。
         # 可配以免硬依赖 uv（如换成其 .venv 的 python）。
         self.launcher = launcher or ["uv", "run", "python"]
+        # 进度事件回调（pipeline 可选注入，见 fetch_creator_notes）；None = 不上报
+        self.on_progress: ProgressCallback | None = None
 
     def _save_path(self, collected_at: str) -> Path:
         # 每次 run 用唯一子目录隔离 MediaCrawler 的同日追加写
@@ -170,17 +183,47 @@ class MediaCrawlerAdapter(ResearchAdapter):
             cmd += ["--cookies", self.cookies]
         return cmd
 
-    def _run_crawler(self, cmd: list[str], timeout: int | None = None) -> tuple[int, str]:
-        """实跑 MediaCrawler；单测注入此点以避免真实采集。timeout 缺省用构造值。"""
-        p = subprocess.run(
+    def _run_crawler(
+        self,
+        cmd: list[str],
+        timeout: int | None = None,
+        on_line: Callable[[str], None] | None = None,
+    ) -> tuple[int, str]:
+        """实跑 MediaCrawler；单测注入此点以避免真实采集。timeout 缺省用构造值。
+
+        流式逐行读（stderr 并入 stdout），每行喂给可选的 on_line（creator 进度解析用）；
+        返回值语义与旧版 subprocess.run 一致：(rc, 完整输出)。超时同样抛
+        TimeoutExpired 且 e.output 带已读到的部分（抢救已落盘账号的口径不变）。
+        """
+        budget = timeout or self.timeout
+        lines: list[str] = []
+        with subprocess.Popen(
             cmd,
             cwd=self.mediacrawler_dir,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
-            timeout=timeout or self.timeout,
-        )
-        return p.returncode, (p.stdout + p.stderr)
+        ) as p:
+            # 读管道放子线程：主线程用 p.wait(timeout) 管超时，读线程永不阻塞超时判定
+            def _pump() -> None:
+                assert p.stdout is not None
+                for line in p.stdout:
+                    lines.append(line)
+                    if on_line is not None:
+                        on_line(line)
+
+            reader = threading.Thread(target=_pump, daemon=True)
+            reader.start()
+            try:
+                rc = p.wait(timeout=budget)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+                reader.join(timeout=5)
+                raise subprocess.TimeoutExpired(cmd, budget, output="".join(lines)) from None
+            reader.join(timeout=5)
+        return rc, "".join(lines)
 
     def _read_results(
         self, save_path: Path, keyword: str, collected_at: str
@@ -339,6 +382,32 @@ class MediaCrawlerAdapter(ResearchAdapter):
             command=" ".join(cmd),
         )
 
+    def _emit(self, event: dict) -> None:
+        """进度事件出口：回调异常只记 DEBUG 不拦采集（显示层故障不值一次会话）。"""
+        if self.on_progress is None:
+            return
+        try:
+            self.on_progress(event)
+        except Exception:
+            logger.debug("进度回调异常（忽略）", exc_info=True)
+
+    def _creator_progress_parser(self) -> Callable[[str], None]:
+        """逐行解析 MC creator 会话输出 → 语义事件（MC 输出格式是平台知识，留在 adapter）。"""
+        counts = {"creator": 0, "note": 0}
+
+        def handle(line: str) -> None:
+            m = _RE_CREATOR_START.search(line)
+            if m:
+                counts["creator"] += 1
+                self._emit(
+                    {"kind": "creator_start", "index": counts["creator"], "user_id": m.group(1)}
+                )
+            elif _RE_NOTE_DETAIL.search(line):
+                counts["note"] += 1
+                self._emit({"kind": "note", "count": counts["note"]})
+
+        return handle
+
     def fetch_creator_notes(
         self, account_ids: list[str], limit: int, collected_at: str
     ) -> FetchResult:
@@ -350,10 +419,11 @@ class MediaCrawlerAdapter(ResearchAdapter):
         session_timeout = max(self.timeout, self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
         t0 = perf_counter()
 
+        on_line = self._creator_progress_parser() if self.on_progress else None
         rc: int | None = None
         run_error: str | None = None
         try:
-            rc, out = self._run_crawler(cmd, timeout=session_timeout)
+            rc, out = self._run_crawler(cmd, timeout=session_timeout, on_line=on_line)
             self._write_crawler_log(save_path, out)
         except subprocess.TimeoutExpired as e:
             run_error = f"session timed out after {session_timeout}s"
