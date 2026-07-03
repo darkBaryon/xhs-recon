@@ -1,0 +1,39 @@
+# 创作者档案落盘 检查清单参数表（方案与评审之间的合同）
+# 用法: python3 workbench/tools/preflight.py --config workbench/cases/创作者档案落盘/checklist.yaml --repo <项目根>
+# 项目根 = /Users/xinyue/VSCode/ws_2026/xhs-recon-lab/xhs-recon
+# 注：MediaCrawler fork 的 store_creator 一行在其自己仓，不进本表（步骤1 手动验证 + Gate 2 真实跑覆盖）
+
+必过命令:                  # 退出码须 0
+  - { name: lint,          run: "uv run ruff check ." }
+  - { name: format,        run: "uv run ruff format --check ." }
+  - { name: tests,         run: "uv run pytest -q" }
+  - { name: demo-research, run: "uv run python -m src.pipelines.cli research --config configs/sample.yaml" }
+  - { name: no-touch,      run: "git diff --quiet ab29b65 -- src/core/__init__.py src/core/aggregator.py src/core/account_ranker.py src/core/keyword_expander.py src/core/note_selector.py src/core/ports.py src/core/time_window.py src/core/watchlist.py src/pipelines/artifacts.py" }
+                           # 本期动：models/parsers/两 adapter/exporter/run_research/cli
+                           # 注：实施前若 main HEAD 已从 ab29b65 漂移，须先重确认起点有效且漂移未涉本项路径
+
+必存产物:                  # demo（sample.yaml 开 watchlist + 档案夹具）跑完后须存在（12 件，评审 #1 更正）
+  - data/exports/latest/accounts.csv
+  - data/exports/latest/comments.csv          # v1 遗漏，评审 #1 阻塞2 补入（sample.yaml comments.enabled: true）
+  - data/exports/latest/notes.csv
+  - data/exports/latest/account_rank.csv
+  - data/exports/latest/typical_notes.csv
+  - data/exports/latest/report_input.md
+  - data/exports/latest/watchlist.csv
+  - data/exports/latest/creator_notes.csv
+  - data/exports/latest/account_profile.csv
+  - data/exports/latest/topic_feed.md
+  - data/exports/latest/topic_feed.jsonl
+  - data/exports/latest/creator_profiles.csv   # 本期新增
+
+必含符号:                  # 本期新增接口必须落地（grep 命中 ≥1）
+  - { grep: "class CreatorProfile",                    in: "src/models.py" }
+  - { grep: "def parse_creator_profiles_jsonl_lines",  in: "src/adapters/parsers.py" }
+  - { grep: "creator_creators_",                       in: "src/adapters/mediacrawler_adapter.py" }
+  - { grep: "creator_profiles_path",                   in: "src/adapters/fixture_adapter.py" }
+  - { grep: "creator_profiles.csv",                    in: "src/core/exporter.py" }
+  - { grep: "creator_profiles",                        in: "src/pipelines/run_research.py" }
+
+禁留标记:                  # 全须 0 命中
+  - { grep: "xhs",     in: "src/core" }        # 铁律：core 平台无关
+  - { grep: "print(",  in: "src" }             # 调试残留
