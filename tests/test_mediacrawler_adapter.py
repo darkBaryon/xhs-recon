@@ -467,6 +467,25 @@ def test_run_crawler_streams_lines_and_returns_full_text(tmp_path):
     assert stdout_only == ["line one", "line two", "line three"]  # 行序保持
 
 
+def test_run_crawler_on_line_exception_does_not_truncate_or_hang(tmp_path):
+    """on_line 抛异常：读线程不能死——否则输出截断，且大输出（超管道缓冲
+    ~64KB）会堵住子进程、把正常会话误判成超时。"""
+    script = tmp_path / "big_output.py"
+    script.write_text(
+        "for i in range(5000):\n    print(f'line {i:04d} ' + 'x' * 40)\n",
+        encoding="utf-8",
+    )
+    a = MediaCrawlerAdapter(str(tmp_path), tmp_path, launcher=[sys.executable])
+
+    def bad_on_line(line):
+        raise RuntimeError("parser broke")
+
+    rc, out = a._run_crawler([sys.executable, str(script)], timeout=30, on_line=bad_on_line)
+
+    assert rc == 0  # 没被误判超时 kill
+    assert out.count("line ") == 5000  # 输出一行不丢
+
+
 def test_run_crawler_timeout_kills_and_keeps_partial_output(tmp_path):
     """超时：kill 子进程，TimeoutExpired.output 带已读到的行（抢救口径不变）。"""
     script = tmp_path / "slow.py"

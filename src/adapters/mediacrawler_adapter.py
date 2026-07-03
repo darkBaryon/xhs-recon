@@ -206,12 +206,17 @@ class MediaCrawlerAdapter(ResearchAdapter):
             errors="replace",
         ) as p:
             # 读管道放子线程：主线程用 p.wait(timeout) 管超时，读线程永不阻塞超时判定
+            # on_line 抛异常必须就地吞掉：读线程一死没人排空管道，子进程写满
+            # 缓冲区会被堵住 → 被误判超时 kill；输出也会静默截断
             def _pump() -> None:
                 assert p.stdout is not None
                 for line in p.stdout:
                     lines.append(line)
                     if on_line is not None:
-                        on_line(line)
+                        try:
+                            on_line(line)
+                        except Exception:
+                            logger.debug("on_line 回调异常（忽略，继续读）", exc_info=True)
 
             reader = threading.Thread(target=_pump, daemon=True)
             reader.start()
