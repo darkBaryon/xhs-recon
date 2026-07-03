@@ -1,35 +1,61 @@
-# 领域资产：留学辅导赛道关注账号（manual 支持纯 user_id 或主页 URL，管线自动归一化）
+# 领域资产：留学辅导赛道关注账号（manual 支持 account_id/url/ref + nickname，管线自动归一化）
 # 主配置以 watchlist_file 引用；与主配置 watchlist.manual 互斥（双源报错）
 # 候选机构号（2026-07-03 网页调研：考而思 / 海马课堂 / 万能班长 / 口袋学霸 / 名津学院）：
 #   在小红书 App 搜到官方号后复制主页链接直接贴进下方列表即可
 #   考而思可在 App 内直接搜小红书号 9721220341（官网自挂；数字号≠主页 id，仍需进主页复制链接）
 #   站外搜索引擎挖不到主页 id（站内页不被收录，官网不给直链）——已验证，别再试
 manual:
-  - 638ea9d7000000001f01d7f7   # 路觅留学生课程辅导
-  - 63a95006000000002801986e   # 辅无忧留学课业辅导规划站
-  - 670cac2a000000001d030d44   # Alevel经济张老师-上海超级学长
+  - account_id: 638ea9d7000000001f01d7f7
+    nickname: 路觅留学生课程辅导
+  - account_id: 63a95006000000002801986e
+    nickname: 辅无忧留学课业辅导规划站
+  - account_id: 670cac2a000000001d030d44
+    nickname: Alevel经济张老师-上海超级学长
   # ↓ 2026-07-03 新词包真实跑回填（id 来自 notes.csv 搜索命中，机构均开矩阵号，先各盯主号）
-  - 627e5833000000002102b087   # 考而思留学生课程辅导
-  - 64ddb636000000000100e335   # 海马课堂留学生课程辅导
-  - 63f2e0c0000000001001ed9b   # 万能班长赶due小组（辅导版）
-  - 62ecf88400000000150147f8   # 西听留学生课程辅导咨询
-  - 65431ec6000000000d0040bc   # 予橙留学生辅导补习（dissertation 线）
+  - account_id: 627e5833000000002102b087
+    nickname: 考而思留学生课程辅导
+  - account_id: 64ddb636000000000100e335
+    nickname: 海马课堂留学生课程辅导
+  - account_id: 63f2e0c0000000001001ed9b
+    nickname: 万能班长赶due小组（辅导版）
+  - account_id: 62ecf88400000000150147f8
+    nickname: 西听留学生课程辅导咨询
+  - account_id: 65431ec6000000000d0040bc
+    nickname: 予橙留学生辅导补习（dissertation 线）
   # ↓ 2026-07-03 扩容至 30（用户拍板）：同轮搜索命中的其余机构/老师号，一品牌一号去矩阵重
-  - 693817a5000000000300f5ef   # 火箭学院国际教育—勤均
-  - 64183142000000001400c354   # HD EDU留学生教育服务
-  - 665ac48d0000000007006b6d   # GOKE留学生辅导
-  - 66ed225b000000001d0311fe   # 留洋搭档留学生辅导
-  - 6045dae7000000000100b99f   # 海师帮留学生稳分辅导
-  - 64ea31850000000001007640   # 甄靠谱留学辅导
-  - 67b56aa00000000006013198   # Ucourse留学生课业在线辅导
-  - 6530a2cb0000000002010634   # 优奇丨留学生辅导
-  - 693bdf52000000003702e543   # 多博学留学申诉辅导中心
-  - 68e92b71000000003702f3ad   # Ello留学学霸小组
-  - 66f90c2a000000000b031ce8   # Emma老师留学生学术辅导（老师 IP 号）
-  - 686b92bf000000001b0229a7   # Aveline老师留学生辅导
-  - 66f25cb2000000000b0330c9   # Dawan学姐留学生辅导
-  - 669645e0000000000f0342c8   # Eliza老师留学生辅导
-  - 668b61610000000003033337   # per new英国留学生辅导
-  - 6280b0fe000000002102ade7   # Link学姐留学辅导
-  - 654859d6000000000301dcf2   # Bella学姐留学辅导
-  - 672678b8000000001d02dc36   # Kiko学姐（留学辅导）
+  - account_id: 693817a5000000000300f5ef
+    nickname: 火箭学院国际教育—勤均
+  - account_id: 64183142000000001400c354
+    nickname: HD EDU留学生教育服务
+  - account_id: 665ac48d0000000007006b6d
+    nickname: GOKE留学生辅导
+  - account_id: 66ed225b000000001d0311fe
+    nickname: 留洋搭档留学生辅导
+  - account_id: 6045dae7000000000100b99f
+    nickname: 海师帮留学生稳分辅导
+  - account_id: 64ea31850000000001007640
+    nickname: 甄靠谱留学辅导
+  - account_id: 67b56aa00000000006013198
+    nickname: Ucourse留学生课业在线辅导
+  - account_id: 6530a2cb0000000002010634
+    nickname: 优奇丨留学生辅导
+  - account_id: 693bdf52000000003702e543
+    nickname: 多博学留学申诉辅导中心
+  - account_id: 68e92b71000000003702f3ad
+    nickname: Ello留学学霸小组
+  - account_id: 66f90c2a000000000b031ce8
+    nickname: Emma老师留学生学术辅导（老师 IP 号）
+  - account_id: 686b92bf000000001b0229a7
+    nickname: Aveline老师留学生辅导
+  - account_id: 66f25cb2000000000b0330c9
+    nickname: Dawan学姐留学生辅导
+  - account_id: 669645e0000000000f0342c8
+    nickname: Eliza老师留学生辅导
+  - account_id: 668b61610000000003033337
+    nickname: per new英国留学生辅导
+  - account_id: 6280b0fe000000002102ade7
+    nickname: Link学姐留学辅导
+  - account_id: 654859d6000000000301dcf2
+    nickname: Bella学姐留学辅导
+  - account_id: 672678b8000000001d02dc36
+    nickname: Kiko学姐（留学辅导）
