@@ -15,8 +15,10 @@ def build_watchlist(
     manual_ids: list[str],
     auto_top_n: int,
     max_total: int,
+    manual_nicknames: dict[str, str] | None = None,
 ) -> list[WatchAccount]:
     nickname_by_id = {r.account_id: r.nickname for r in ranked}
+    manual_nicknames = manual_nicknames or {}
     accounts: list[WatchAccount] = []
     seen: set[str] = set()
 
@@ -27,7 +29,7 @@ def build_watchlist(
         accounts.append(
             WatchAccount(
                 account_id=account_id,
-                nickname=nickname_by_id.get(account_id, ""),
+                nickname=manual_nicknames.get(account_id) or nickname_by_id.get(account_id, ""),
                 source="manual",
             )
         )

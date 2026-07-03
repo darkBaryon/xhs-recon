@@ -2,6 +2,9 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from time import perf_counter
+
+import pytest
 
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
 from src.models import TypicalNote
@@ -29,11 +32,38 @@ def test_build_command_has_compliance_flags(tmp_path):
     cmd = _adapter(tmp_path)._build_command("留学辅导", 1, 20, tmp_path / "run")
     assert cmd[cmd.index("--enable_ip_proxy") + 1] == "no"  # 关代理池
     assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"  # 单并发
+    assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "2.0"
     assert cmd[cmd.index("--get_comment") + 1] == "no"  # 禁评论（期2 不碰评论、不存敏感字段）
     assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
     assert cmd[cmd.index("--keywords") + 1] == "留学辅导"
     assert cmd[cmd.index("--type") + 1] == "search"
     assert "ENABLE_CDP" not in " ".join(cmd)  # CDP 用默认，不在命令里
+
+
+def test_build_search_command_joins_keywords_single_session(tmp_path):
+    cmd = _adapter(tmp_path)._build_search_command(
+        ["留学辅导", "essay辅导"],
+        1,
+        2,
+        20,
+        tmp_path / "search",
+    )
+
+    assert cmd[cmd.index("--type") + 1] == "search"
+    assert cmd[cmd.index("--keywords") + 1] == "留学辅导,essay辅导"
+    assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "40"
+    assert cmd[cmd.index("--start") + 1] == "1"
+    assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"
+
+
+def test_build_command_uses_configured_speed_controls(tmp_path):
+    cmd = _adapter(tmp_path, max_concurrency=2, sleep_sec=0.5)._build_command(
+        "留学辅导", 1, 12, tmp_path / "run"
+    )
+
+    assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "12"
+    assert cmd[cmd.index("--max_concurrency_num") + 1] == "2"
+    assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "0.5"
 
 
 def test_cookies_appended_only_when_set(tmp_path):
@@ -52,7 +82,7 @@ def test_search_success_reads_and_parses(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
     sample = Path(SAMPLE).read_text(encoding="utf-8")
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -71,7 +101,7 @@ def test_search_replacement_character_output_still_parses(tmp_path, monkeypatch)
     a = _adapter(tmp_path)
     sample = Path(SAMPLE).read_text(encoding="utf-8")
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -147,7 +177,7 @@ def test_fetch_comments_builds_detail_command_and_reads_jsonl(tmp_path, monkeypa
     a = _adapter(tmp_path)
     commands = []
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         commands.append(cmd)
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
@@ -217,36 +247,38 @@ def test_fetch_comments_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, m
     assert "MediaCrawler 退出码 1" in caplog.text
 
 
-def test_build_creator_command_has_creator_flags(tmp_path):
+def test_build_creator_command_joins_ids_single_session(tmp_path):
+    # 单会话：多个 id 逗号拼接进一条命令
     cmd = _adapter(tmp_path)._build_creator_command(
-        "601d0481000000000101cc46",
+        ["601d0481000000000101cc46", "602d0481000000000101cc47"],
         7,
-        tmp_path / "creator" / "601d0481000000000101cc46",
+        tmp_path / "creator",
     )
 
     assert cmd[cmd.index("--type") + 1] == "creator"
-    assert cmd[cmd.index("--creator_id") + 1] == "601d0481000000000101cc46"
+    assert cmd[cmd.index("--creator_id") + 1] == (
+        "601d0481000000000101cc46,602d0481000000000101cc47"
+    )
     assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "7"
-    assert cmd[cmd.index("--enable_ip_proxy") + 1] == "no"
-    assert cmd[cmd.index("--get_comment") + 1] == "no"
-    assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
-    assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"
+    assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"  # 单并发不变
+    assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "2.0"
 
 
-def test_fetch_creator_notes_runs_each_account_in_own_dir_and_reads_jsonl(tmp_path, monkeypatch):
+def test_fetch_creator_notes_single_session_reads_combined_jsonl(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
     fixture_lines = Path(CREATOR).read_text(encoding="utf-8").splitlines()
     commands = []
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         commands.append(cmd)
-        account_id = cmd[cmd.index("--creator_id") + 1]
+        # 单会话：一次调用写请求账号到同一个 jsonl（MC 只拉 --creator_id 列出的账号）
+        wanted = cmd[cmd.index("--creator_id") + 1].split(",")
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
-        lines = [line for line in fixture_lines if f'"user_id": "{account_id}"' in line]
+        lines = [ln for ln in fixture_lines if any(f'"user_id": "{w}"' in ln for w in wanted)]
         (d / "creator_contents_2026-07-02.jsonl").write_text("\n".join(lines), encoding="utf-8")
-        return 0, f"creator stdout {account_id}"
+        return 0, "creator stdout"
 
     monkeypatch.setattr(a, "_run_crawler", fake_run)
     r = a.fetch_creator_notes(
@@ -257,55 +289,92 @@ def test_fetch_creator_notes_runs_each_account_in_own_dir_and_reads_jsonl(tmp_pa
 
     assert r.ok
     assert r.operation == "creator_notes"
-    assert len(r.notes) == 4
     assert {n.account_id for n in r.notes} == {
         "601d0481000000000101cc46",
         "602d0481000000000101cc47",
     }
-    assert all(n.source_keywords == [] for n in r.notes)
-    assert all(n.like_count == 0 for n in r.notes)
-    assert len(commands) == 2
-    for cmd in commands:
-        account_id = cmd[cmd.index("--creator_id") + 1]
-        assert Path(cmd[cmd.index("--save_data_path") + 1]).parts[-2:] == (
-            "creator",
-            account_id,
-        )
-        assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "2"
+    assert len(commands) == 1  # 单会话：只一次子进程
+    assert commands[0][commands[0].index("--creator_id") + 1] == (
+        "601d0481000000000101cc46,602d0481000000000101cc47"
+    )
 
 
-def test_fetch_creator_notes_partial_failure_keeps_success_notes(tmp_path, monkeypatch, caplog):
+def test_fetch_creator_notes_missing_account_marked_failed(tmp_path, monkeypatch, caplog):
+    # 单会话失败判定：请求的 id 在结果里没出现 = 失败（会话内单账号失败 MC 自身跳过）
     a = _adapter(tmp_path)
     fixture_lines = Path(CREATOR).read_text(encoding="utf-8").splitlines()
-    failed_id = "602d0481000000000101cc47"
+    present_id = "601d0481000000000101cc46"
+    missing_id = "602d0481000000000101cc47"
 
-    def fake_run(cmd):
-        account_id = cmd[cmd.index("--creator_id") + 1]
-        if account_id == failed_id:
-            return 1, "creator boom"
+    def fake_run(cmd, timeout=None, on_line=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
-        lines = [line for line in fixture_lines if f'"user_id": "{account_id}"' in line]
+        # 只有 present_id 的行落盘，missing_id 无数据（模拟会话内该账号失败）
+        lines = [line for line in fixture_lines if f'"user_id": "{present_id}"' in line]
         (d / "creator_contents_2026-07-02.jsonl").write_text("\n".join(lines), encoding="utf-8")
         return 0, "creator ok"
 
     monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes([present_id, missing_id], 2, "2026-07-02T00:00:00Z")
 
+    assert not r.ok
+    assert {n.account_id for n in r.notes} == {present_id}
+    assert r.error == f"creator fetch failed: {missing_id}"
+    assert r.raw_path.endswith("creator")
+
+
+def test_fetch_creator_notes_nonzero_exit_all_failed(tmp_path, monkeypatch, caplog):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        return 1, "creator session boom"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
     with caplog.at_level(logging.WARNING):
         r = a.fetch_creator_notes(
-            ["601d0481000000000101cc46", failed_id],
+            ["601d0481000000000101cc46", "602d0481000000000101cc47"],
             2,
             "2026-07-02T00:00:00Z",
         )
 
     assert not r.ok
-    assert len(r.notes) == 2
-    assert {n.account_id for n in r.notes} == {"601d0481000000000101cc46"}
-    assert r.error == f"creator fetch failed: {failed_id}"
-    assert r.raw_path.endswith("creator")
-    assert " && " in r.command
+    assert r.notes == []
+    assert "exit 1" in r.error
+    # 整会话失败：两个 id 都算失败
+    assert "601d0481000000000101cc46" in r.error
+    assert "602d0481000000000101cc47" in r.error
     assert "MediaCrawler 退出码 1" in caplog.text
+
+
+def test_fetch_creator_notes_nonzero_exit_summarizes_login_expired(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        return 1, "Traceback...\nDataFetchError: 登录已过期\nRetryError..."
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["601d0481000000000101cc46"], 2, "2026")
+
+    assert not r.ok
+    assert "exit 1: 登录已过期" in r.error
+
+
+def test_fetch_creator_notes_nonzero_exit_summarizes_captcha(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        return (
+            1,
+            "CAPTCHA appeared, request failed, Verifytype: 301, "
+            "Verifyuuid: abc, Response: <Response [461 status code 461]>",
+        )
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["601d0481000000000101cc46"], 2, "2026")
+
+    assert not r.ok
+    assert "exit 1: 触发验证码/风控：Verifytype: 301" in r.error
 
 
 def test_search_save_path_isolated_per_keyword_and_page(tmp_path):
@@ -323,7 +392,7 @@ def test_search_save_path_isolated_per_keyword_and_page(tmp_path):
 def test_search_uses_isolated_save_path_in_command(tmp_path, monkeypatch):
     seen = []
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         seen.append(Path(cmd[cmd.index("--save_data_path") + 1]))
         return 1, "boom"  # 直接失败即可，只看命令
 
@@ -334,10 +403,121 @@ def test_search_uses_isolated_save_path_in_command(tmp_path, monkeypatch):
     assert seen[0] != seen[1]
 
 
+def test_search_many_single_session_groups_by_source_keyword(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    commands = []
+    events = []
+    a.on_progress = events.append
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        commands.append(cmd)
+        assert on_line is not None
+        for line in [
+            "[XiaoHongShuCrawler.search] Current search keyword: 留学辅导\n",
+            "[XiaoHongShuCrawler.search] search Xiaohongshu keyword: 留学辅导, page: 1\n",
+            "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+            "[XiaoHongShuCrawler.search] Current search keyword: essay辅导\n",
+            "[XiaoHongShuCrawler.search] search Xiaohongshu keyword: essay辅导, page: 1\n",
+            "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
+        ]:
+            on_line(line)
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_contents_2026.jsonl").write_text(
+            "\n".join(
+                [
+                    (
+                        '{"note_id":"n1","user_id":"u1","nickname":"机构A",'
+                        '"source_keyword":"留学辅导"}'
+                    ),
+                    (
+                        '{"note_id":"n2","user_id":"u2","nickname":"机构B",'
+                        '"source_keyword":"essay辅导"}'
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return 0, "search stdout"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    results = a.search_many(["留学辅导", "essay辅导"], 1, 20, "2026")
+
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("--keywords") + 1] == "留学辅导,essay辅导"
+    assert [r.keyword for r in results] == ["留学辅导", "essay辅导"]
+    assert [r.notes[0].note_id for r in results] == ["n1", "n2"]
+    assert [r.accounts[0].account_id for r in results] == ["u1", "u2"]
+    assert Path(results[0].raw_path, "mediacrawler.log").read_text(encoding="utf-8") == (
+        "search stdout"
+    )
+    assert events == [
+        {"kind": "keyword_start", "index": 1, "keyword": "留学辅导"},
+        {"kind": "page_start", "keyword": "留学辅导", "page": 1},
+        {"kind": "note", "count": 1},
+        {"kind": "keyword_start", "index": 2, "keyword": "essay辅导"},
+        {"kind": "page_start", "keyword": "essay辅导", "page": 1},
+        {"kind": "note", "count": 1},
+        {"kind": "done"},
+    ]
+
+
+def test_search_many_nonzero_salvages_completed_keyword(tmp_path, monkeypatch, caplog):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_contents_2026.jsonl").write_text(
+            '{"note_id":"n1","user_id":"u1","source_keyword":"留学辅导"}',
+            encoding="utf-8",
+        )
+        return 1, "detail failed"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    with caplog.at_level(logging.WARNING):
+        results = a.search_many(["留学辅导", "essay辅导"], 1, 20, "2026")
+
+    assert results[0].ok
+    assert results[0].notes[0].note_id == "n1"
+    assert not results[1].ok
+    assert "exit 1" in results[1].error
+    assert "no notes parsed" in results[1].error
+    assert "MediaCrawler 退出码 1" in caplog.text
+
+
+def test_search_many_empty_keyword_reports_detail_failures(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        assert on_line is not None
+        for line in [
+            "[XiaoHongShuCrawler.search] Current search keyword: 论文修改润色\n",
+            (
+                "[XiaoHongShuCrawler.get_note_detail_async_task] "
+                "Failed to get note detail, note_id: n1, api_error: empty response\n"
+            ),
+            "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+            ("[XiaoHongShuCrawler.get_note_detail_async_task] Failed to get note detail, Id: n2\n"),
+            "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
+        ]:
+            on_line(line)
+        return 0, "search stdout"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    results = a.search_many(["论文修改润色"], 1, 12, "2026")
+
+    assert not results[0].ok
+    assert "detail failed 2/2 candidates" in results[0].error
+    assert "no notes parsed from output" in results[0].error
+
+
 def test_search_corrupt_jsonl_is_error_not_crash(tmp_path, monkeypatch):
     """B2：读回坏行进 error（与 comments/creator 同口径），不穿透崩管线。"""
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -358,7 +538,7 @@ def test_creator_reads_profiles_when_present(tmp_path, monkeypatch):
         ' "tag_list": "{\\"profession\\": \\"教育\\"}"}'
     )
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -378,7 +558,7 @@ def test_creator_reads_profiles_when_present(tmp_path, monkeypatch):
 def test_creator_missing_profiles_file_degrades_empty(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
 
-    def fake_run(cmd):
+    def fake_run(cmd, timeout=None, on_line=None):
         sp = Path(cmd[cmd.index("--save_data_path") + 1])
         d = sp / "xhs" / "jsonl"
         d.mkdir(parents=True, exist_ok=True)
@@ -390,4 +570,188 @@ def test_creator_missing_profiles_file_degrades_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(a, "_run_crawler", fake_run)
     r = a.fetch_creator_notes(["aaaa"], 5, "2026")
     assert r.profiles == []  # 软降级，不入 error
+    assert r.ok
+
+
+def test_fetch_creator_notes_timeout_salvages_partial(tmp_path, monkeypatch):
+    """单会话超时：已落盘的账号要抢救回来，只有没跑完的算失败。"""
+    import subprocess as sp_mod
+
+    a = _adapter(tmp_path)
+    fixture_lines = Path(CREATOR).read_text(encoding="utf-8").splitlines()
+    done_id = "601d0481000000000101cc46"
+    timeout_id = "602d0481000000000101cc47"
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        # 模拟：跑到一半超时——done_id 已落盘，然后抛 TimeoutExpired
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        lines = [ln for ln in fixture_lines if f'"user_id": "{done_id}"' in ln]
+        (d / "creator_contents_2026-07-02.jsonl").write_text("\n".join(lines), encoding="utf-8")
+        raise sp_mod.TimeoutExpired(cmd, timeout or 600)
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes([done_id, timeout_id], 2, "2026-07-02T00:00:00Z")
+
+    assert {n.account_id for n in r.notes} == {done_id}  # 已落盘账号抢救成功
+    assert not r.ok
+    assert "timed out" in r.error
+    assert timeout_id in r.error  # 没跑完的算失败
+
+
+def test_creator_session_timeout_scales_with_account_count(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    seen_timeout = []
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        seen_timeout.append(timeout)
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    a.fetch_creator_notes([f"{i:024d}" for i in range(20)], 10, "2026")
+    # 20 账号 × 120s = 2400s，远大于默认 600
+    assert seen_timeout[0] == 20 * a._CREATOR_PER_ACCOUNT_SEC
+
+
+# ---- _run_crawler 流式改造：语义不变 + 逐行回调 ----
+
+
+def test_run_crawler_streams_lines_and_returns_full_text(tmp_path):
+    """(rc, full_text) 语义不变；on_line 按序收到每一行。"""
+    script = tmp_path / "chatty.py"
+    script.write_text(
+        "import sys\nprint('line one')\nprint('line two')\n"
+        "sys.stderr.write('err line\\n')\nprint('line three')\n",
+        encoding="utf-8",
+    )
+    a = MediaCrawlerAdapter(str(tmp_path), tmp_path, launcher=[sys.executable])
+    seen = []
+
+    rc, out = a._run_crawler([sys.executable, str(script)], on_line=seen.append)
+
+    assert rc == 0
+    for expected in ("line one", "line two", "err line", "line three"):
+        assert expected in out  # stderr 并入 stdout，完整输出不丢
+    stdout_only = [ln.strip() for ln in seen if ln.startswith("line")]
+    assert stdout_only == ["line one", "line two", "line three"]  # 行序保持
+
+
+def test_run_crawler_on_line_exception_does_not_truncate_or_hang(tmp_path):
+    """on_line 抛异常：读线程不能死——否则输出截断，且大输出（超管道缓冲
+    ~64KB）会堵住子进程、把正常会话误判成超时。"""
+    script = tmp_path / "big_output.py"
+    script.write_text(
+        "for i in range(5000):\n    print(f'line {i:04d} ' + 'x' * 40)\n",
+        encoding="utf-8",
+    )
+    a = MediaCrawlerAdapter(str(tmp_path), tmp_path, launcher=[sys.executable])
+
+    def bad_on_line(line):
+        raise RuntimeError("parser broke")
+
+    rc, out = a._run_crawler([sys.executable, str(script)], timeout=30, on_line=bad_on_line)
+
+    assert rc == 0  # 没被误判超时 kill
+    assert out.count("line ") == 5000  # 输出一行不丢
+
+
+def test_run_crawler_timeout_kills_and_keeps_partial_output(tmp_path):
+    """超时：kill 子进程，TimeoutExpired.output 带已读到的行（抢救口径不变）。"""
+    script = tmp_path / "slow.py"
+    script.write_text(
+        "import sys, time\nprint('early line', flush=True)\ntime.sleep(60)\n",
+        encoding="utf-8",
+    )
+    a = MediaCrawlerAdapter(str(tmp_path), tmp_path, launcher=[sys.executable])
+    t0 = perf_counter()
+
+    with pytest.raises(subprocess.TimeoutExpired) as ei:
+        a._run_crawler([sys.executable, str(script)], timeout=2)
+
+    assert perf_counter() - t0 < 30  # 确实 kill 了，没等满 60s
+    assert "early line" in (ei.value.output or "")
+
+
+# ---- creator 进度事件：MC 标记行 → 语义事件 ----
+
+MC_CREATOR_LINES = [
+    "[XiaoHongShuCrawler.get_creators_and_notes] Parse creator URL info: user_id='aaa'\n",
+    "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+    "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
+    "some unrelated log line\n",
+    "[XiaoHongShuCrawler.get_creators_and_notes] Parse creator URL info: user_id='bbb'\n",
+    "[get_note_detail_async_task] Finish get note detail, note_id: n3\n",
+]
+
+
+def test_creator_progress_events_from_mc_output(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    events = []
+    a.on_progress = events.append
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        assert on_line is not None  # 设了回调才建解析器
+        for line in MC_CREATOR_LINES:
+            on_line(line)
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "creator_contents_2026.jsonl").write_text(
+            '{"note_id":"n1","user_id":"aaa"}\n{"note_id":"n3","user_id":"bbb"}',
+            encoding="utf-8",
+        )
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["aaa", "bbb"], 5, "2026")
+
+    assert r.ok
+    assert events == [
+        {"kind": "creator_start", "index": 1, "user_id": "aaa"},
+        {"kind": "note", "count": 1},
+        {"kind": "note", "count": 2},
+        {"kind": "creator_start", "index": 2, "user_id": "bbb"},
+        {"kind": "note", "count": 3},
+        {"kind": "done"},
+    ]
+
+
+def test_creator_no_callback_means_no_parser(tmp_path, monkeypatch):
+    """未注入 on_progress（默认）：不建解析器，_run_crawler 收到 on_line=None。"""
+    a = _adapter(tmp_path)
+    seen_on_line = []
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        seen_on_line.append(on_line)
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    a.fetch_creator_notes(["aaa"], 5, "2026")
+    assert seen_on_line == [None]
+
+
+def test_creator_progress_callback_exception_does_not_break_fetch(tmp_path, monkeypatch):
+    """回调炸了只记日志：采集结果照常返回。"""
+    a = _adapter(tmp_path)
+
+    def bad_callback(event):
+        raise RuntimeError("display broke")
+
+    a.on_progress = bad_callback
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        for line in MC_CREATOR_LINES:
+            on_line(line)
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "creator_contents_2026.jsonl").write_text(
+            '{"note_id":"n1","user_id":"aaa"}\n{"note_id":"n2","user_id":"bbb"}',
+            encoding="utf-8",
+        )
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["aaa", "bbb"], 5, "2026")
     assert r.ok

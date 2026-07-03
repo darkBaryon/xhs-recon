@@ -57,6 +57,20 @@ def test_build_watchlist_preserves_manual_when_manual_overlaps_auto_window():
     assert watchlist[0].nickname == "Rank One"
 
 
+def test_build_watchlist_uses_manual_nickname_before_ranked_nickname():
+    ranked = [_rank("000000000000000000000001", "Rank One", 30)]
+
+    watchlist = build_watchlist(
+        ranked,
+        manual_ids=["000000000000000000000001"],
+        auto_top_n=1,
+        max_total=5,
+        manual_nicknames={"000000000000000000000001": "Manual One"},
+    )
+
+    assert watchlist[0].nickname == "Manual One"
+
+
 def test_build_watchlist_truncates_to_max_total():
     ranked = [
         _rank("000000000000000000000001", "Auto One", 30),

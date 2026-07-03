@@ -14,6 +14,7 @@ CONFIG="${CONFIG:-configs/留学辅导/run.yaml}"
 
 CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PROFILE_DIR="$HOME/.xhs-recon-chrome"
+LOCK_DIR="$PROFILE_DIR/.xhs-recon-run.lock"
 CDP_URL="http://127.0.0.1:9222/json/version"
 
 cdp_alive() { curl -s --max-time 2 "$CDP_URL" >/dev/null 2>&1; }
@@ -40,6 +41,38 @@ ensure_browser() {
   exit 1
 }
 
+release_run_lock() {
+  if [ -d "$LOCK_DIR" ] && [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
+    rm -f "$LOCK_DIR/pid"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
+acquire_run_lock() {
+  mkdir -p "$PROFILE_DIR"
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "$$" >"$LOCK_DIR/pid"
+    trap release_run_lock EXIT
+    return
+  fi
+
+  holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ -n "$holder" ] && ps -p "$holder" >/dev/null 2>&1; then
+    echo "错误：已有真实采集任务在运行（pid ${holder}）。请等它结束后再跑，避免多个任务共用 CDP 触发风控。" >&2
+    exit 1
+  fi
+
+  echo "清理上次异常退出留下的采集锁……" >&2
+  rm -f "$LOCK_DIR/pid" 2>/dev/null || true
+  rmdir "$LOCK_DIR" 2>/dev/null || {
+    echo "错误：采集锁被占用：$LOCK_DIR" >&2
+    exit 1
+  }
+  mkdir "$LOCK_DIR"
+  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  trap release_run_lock EXIT
+}
+
 cmd="${1:-demo}"
 [ $# -gt 0 ] && shift
 
@@ -49,11 +82,13 @@ case "$cmd" in
     ;;
   search|sync|comments)
     ensure_browser
-    exec uv run python -m src.pipelines.cli "$cmd" --config "$CONFIG" "$@"
+    acquire_run_lock
+    uv run python -m src.pipelines.cli "$cmd" --config "$CONFIG" "$@"
     ;;
   real)
     ensure_browser
-    exec uv run python -m src.pipelines.cli research --config "$CONFIG" "$@"
+    acquire_run_lock
+    uv run python -m src.pipelines.cli research --config "$CONFIG" "$@"
     ;;
   browser)
     ensure_browser
