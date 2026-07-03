@@ -1,9 +1,12 @@
 """progress 显示层：非 TTY 静默（no-op 不输出）；TTY（注入 force_terminal）画条不炸。"""
 
 import io
+from contextlib import contextmanager
 
 from rich.console import Console
 
+import src.pipelines.run_research as run_research
+from src.models import FetchResult
 from src.pipelines import progress
 
 
@@ -85,3 +88,57 @@ def test_spinner_tty_shows_status():
     with progress.spinner("评论采集：30 条", console=_tty_console(buf)):
         pass
     assert "评论采集" in buf.getvalue()
+
+
+# ---- 管线接线：_sync_stage 对支持进度的 adapter 注入回调、用完复位 ----
+
+
+class _StubProgressAdapter:
+    """有 on_progress 属性 = 支持进度事件（与 MediaCrawlerAdapter 同约定）。"""
+
+    provider_name = "stub"
+
+    def __init__(self):
+        self.on_progress = None
+        self.callback_during_fetch = "unset"
+
+    def fetch_creator_notes(self, account_ids, limit, collected_at):
+        self.callback_during_fetch = self.on_progress
+        return FetchResult(
+            provider=self.provider_name,
+            operation="creator_notes",
+            collected_at=collected_at,
+        )
+
+
+def test_sync_stage_injects_and_resets_progress_callback(monkeypatch):
+    def sentinel_cb(event):
+        pass
+
+    @contextmanager
+    def fake_creator_progress(total, names=None, console=None):
+        assert total == 1
+        yield sentinel_cb  # 模拟 TTY：给出真回调
+
+    monkeypatch.setattr(progress, "creator_progress", fake_creator_progress)
+    adapter = _StubProgressAdapter()
+    config = {"watchlist": {"manual": ["601d0481000000000101cc46"]}}
+
+    run_research._sync_stage(config, adapter, "2026-07-03T00:00:00Z", [])
+
+    assert adapter.callback_during_fetch is sentinel_cb  # 采集期间已注入
+    assert adapter.on_progress is None  # 用完复位
+
+
+def test_sync_stage_non_tty_leaves_adapter_callback_unset(monkeypatch):
+    @contextmanager
+    def fake_creator_progress(total, names=None, console=None):
+        yield None  # 模拟非 TTY
+
+    monkeypatch.setattr(progress, "creator_progress", fake_creator_progress)
+    adapter = _StubProgressAdapter()
+    config = {"watchlist": {"manual": ["601d0481000000000101cc46"]}}
+
+    run_research._sync_stage(config, adapter, "2026-07-03T00:00:00Z", [])
+
+    assert adapter.callback_during_fetch is None  # 非 TTY：不注入，零回调开销

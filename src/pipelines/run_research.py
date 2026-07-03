@@ -33,6 +33,7 @@ from src.models import (
     TypicalNote,
     WatchAccount,
 )
+from src.pipelines import progress
 from src.pipelines.logging_setup import _compact_run_id, configure_logging, log_result
 
 app = typer.Typer(add_completion=False)
@@ -174,21 +175,24 @@ def _search_stage(
     window_days = search_cfg.get("window_days", 0)
 
     results = []
-    for kw in keywords:
-        for page in range(1, pages + 1):
-            t0 = perf_counter()
-            result = adapter.search(kw, page, limit, collected_at)
-            dt = perf_counter() - t0
-            log_result(logger, result)
-            logger.info(
-                "搜索「%s」第 %d 页：笔记 %d · 账号 %d · %.1fs",
-                kw,
-                page,
-                len(result.notes),
-                len(result.accounts),
-                dt,
-            )
-            results.append(result)
+    with progress.stage_bar("搜索", total=len(keywords) * pages) as bar:
+        for kw in keywords:
+            for page in range(1, pages + 1):
+                bar.describe(f"搜索「{kw}」")
+                t0 = perf_counter()
+                result = adapter.search(kw, page, limit, collected_at)
+                dt = perf_counter() - t0
+                bar.advance()
+                log_result(logger, result)
+                logger.info(
+                    "搜索「%s」第 %d 页：笔记 %d · 账号 %d · %.1fs",
+                    kw,
+                    page,
+                    len(result.notes),
+                    len(result.accounts),
+                    dt,
+                )
+                results.append(result)
 
     results = _apply_time_window(results, window_days, collected_at)
     notes, accounts = aggregate(results)
@@ -228,12 +232,22 @@ def _sync_stage(
     creator_profiles: list[CreatorProfile] = []
     if watchlist:
         creator_cfg = config.get("creator", {})
+        # 进度显示：adapter 支持进度事件（有 on_progress 属性，如 MediaCrawler）才注入
+        # 回调；非 TTY 时 creator_progress 直接给 None，adapter 零回调开销
+        names = {wa.account_id: wa.nickname or wa.account_id for wa in watchlist}
         try:
-            creator_result = adapter.fetch_creator_notes(
-                [account.account_id for account in watchlist],
-                creator_cfg.get("notes_per_account", 10),
-                collected_at,
-            )
+            with progress.creator_progress(len(watchlist), names) as on_progress:
+                if on_progress is not None and hasattr(adapter, "on_progress"):
+                    adapter.on_progress = on_progress
+                try:
+                    creator_result = adapter.fetch_creator_notes(
+                        [account.account_id for account in watchlist],
+                        creator_cfg.get("notes_per_account", 10),
+                        collected_at,
+                    )
+                finally:
+                    if hasattr(adapter, "on_progress"):
+                        adapter.on_progress = None
         except NotImplementedError:
             logger.warning("创作者笔记采集：跳过（数据源不支持）")
         else:
@@ -293,9 +307,10 @@ def _comments_stage(
         # 进行时提示：评论段是单个子进程调用，期间无逐条输出，预告避免误判卡死
         logger.info("评论：开始采集 %d 条典型笔记的评论（单并发批量，约需数分钟）", len(targets))
         try:
-            comment_result = adapter.fetch_comments(
-                targets, comments_cfg.get("limit", 10), collected_at
-            )
+            with progress.spinner(f"评论采集：{len(targets)} 条典型笔记…"):
+                comment_result = adapter.fetch_comments(
+                    targets, comments_cfg.get("limit", 10), collected_at
+                )
         except NotImplementedError:
             comment_result = None
             logger.info("评论：跳过（数据源不支持）")
