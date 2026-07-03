@@ -131,7 +131,12 @@ class MediaCrawlerAdapter(ResearchAdapter):
             cmd += ["--cookies", self.cookies]
         return cmd
 
-    def _build_creator_command(self, account_id: str, limit: int, save_path: Path) -> list[str]:
+    def _build_creator_command(
+        self, account_ids: list[str], limit: int, save_path: Path
+    ) -> list[str]:
+        # 单会话多账号：--creator_id 接受逗号分隔列表，MC 在一次会话里顺序拉完
+        # （省掉逐账号的浏览器启动开销）；--max_concurrency_num 1 保持单并发不变，
+        # 会话内仍按 CRAWLER_MAX_SLEEP_SEC 间隔请求，速率不放大（合规红线不动）。
         cmd = [
             *self.launcher,
             "main.py",
@@ -140,7 +145,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "--type",
             "creator",
             "--creator_id",
-            account_id,
+            ",".join(account_ids),
             "--lt",
             self.login_type,
             "--save_data_option",
@@ -334,42 +339,50 @@ class MediaCrawlerAdapter(ResearchAdapter):
     def fetch_creator_notes(
         self, account_ids: list[str], limit: int, collected_at: str
     ) -> FetchResult:
-        save_root = self._save_path(collected_at) / "creator"
-        commands: list[str] = []
-        failed_ids: list[str] = []
+        # 单会话：全部账号一次子进程，MC 会话内顺序拉完（省 N-1 次浏览器启动）；
+        # 合并落盘（一个 save_path），notes/profiles 各行自带 user_id 可区分。
+        save_path = self._save_path(collected_at) / "creator"
+        cmd = self._build_creator_command(account_ids, limit, save_path)
+        t0 = perf_counter()
+
+        try:
+            rc, out = self._run_crawler(cmd)
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+            self._write_crawler_log(save_path, f"run failed: {e}")
+            return self._err(
+                None,
+                None,
+                collected_at,
+                cmd,
+                f"run failed: {e}",
+                save_path,
+                operation="creator_notes",
+            )
+        self._write_crawler_log(save_path, out)
+
         notes: list[Note] = []
         accounts: list[Account] = []
         profiles: list[CreatorProfile] = []
-
-        for account_id in account_ids:
-            save_path = save_root / account_id
-            cmd = self._build_creator_command(account_id, limit, save_path)
-            commands.append(" ".join(cmd))
-            t0 = perf_counter()
+        if rc == 0:
             try:
-                rc, out = self._run_crawler(cmd)
-            except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
-                failed_ids.append(account_id)
-                self._write_crawler_log(save_path, f"run failed: {e}")
-                continue
-            self._write_crawler_log(save_path, out)
-            if rc != 0:
-                logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
-                failed_ids.append(account_id)
-                continue
-            try:
-                account_notes, account_rows = self._read_creator_results(save_path, collected_at)
+                notes, accounts = self._read_creator_results(save_path, collected_at)
+                profiles = self._read_creator_profiles(save_path, collected_at)
             except (OSError, ValueError) as e:
-                failed_ids.append(account_id)
                 self._write_crawler_log(save_path, f"read creator failed: {e}")
-                continue
-            notes.extend(account_notes)
-            accounts.extend(account_rows)
-            profiles.extend(self._read_creator_profiles(save_path, collected_at))
-            # 每账号耗时留痕：多账号串行的总时长 = Σ单账号，复盘节奏用
-            logger.debug(
-                "creator %s：%d 条 · %.1fs", account_id, len(account_notes), perf_counter() - t0
-            )
+        else:
+            logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
+
+        # 失败判定（单会话下无逐账号退出码）：请求的 id 在结果里既无笔记又无档案 = 失败。
+        # 会话内单账号失败 MC 自身 try/except continue，其余账号照常落盘。
+        got = {n.account_id for n in notes} | {p.account_id for p in profiles}
+        failed_ids = [aid for aid in account_ids if aid not in got]
+        logger.debug(
+            "creator 单会话：%d 账号 · 笔记 %d · 档案 %d · %.1fs",
+            len(account_ids),
+            len(notes),
+            len(profiles),
+            perf_counter() - t0,
+        )
 
         error = f"creator fetch failed: {','.join(failed_ids)}" if failed_ids else None
         return FetchResult(
@@ -379,7 +392,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             notes=notes,
             accounts=accounts,
             profiles=profiles,
-            raw_path=str(save_root),
+            raw_path=str(save_path),
             error=error,
-            command=" && ".join(commands),
+            command=" ".join(cmd),
         )
