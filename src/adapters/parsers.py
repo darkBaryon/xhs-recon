@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from src.models import Account, Comment, Note
+from src.models import Account, Comment, CreatorProfile, Note
 
 CREATOR_ID_RE = re.compile(r"^[0-9a-fA-F]{24}$")
 
@@ -119,6 +119,59 @@ def parse_jsonl_lines(
         notes.append(parse_note(row, keyword=keyword, collected_at=collected_at, raw_path=raw_path))
         accounts.append(parse_account(row, keyword=keyword, collected_at=collected_at))
     return notes, accounts
+
+
+def _parse_tag_list(raw) -> dict[str, str]:
+    """save_creator 的 tag_list 是 {tagType: name} 的 JSON 串；坏值降级空 dict。"""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def _verify_type(raw) -> int:
+    # 官方认证类型：缺字段（旧版 fork）或非法值 → -1（未知，区别于 0=未认证）
+    if raw is None:
+        return -1
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return -1
+
+
+def parse_creator_profile(row: dict, *, collected_at: str) -> CreatorProfile:
+    return CreatorProfile(
+        account_id=row.get("user_id", ""),
+        nickname=row.get("nickname", ""),
+        red_id=str(row.get("red_id") or ""),
+        verify_type=_verify_type(row.get("verify_type")),
+        desc=row.get("desc") or "",
+        fans=normalize_count(row.get("fans")),
+        follows=normalize_count(row.get("follows")),
+        interaction=normalize_count(row.get("interaction")),
+        tags=_parse_tag_list(row.get("tag_list")),
+        ip_location=row.get("ip_location") or "",
+        collected_at=collected_at,
+    )
+
+
+def parse_creator_profiles_jsonl_lines(lines, *, collected_at: str) -> list[CreatorProfile]:
+    profiles: list[CreatorProfile] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue  # 档案是软信号：坏行跳过，不坏整跑
+        profiles.append(parse_creator_profile(row, collected_at=collected_at))
+    return profiles
 
 
 def parse_comments_jsonl_lines(lines, *, collected_at: str) -> list[Comment]:

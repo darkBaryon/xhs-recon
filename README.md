@@ -76,6 +76,7 @@ curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 | `report_input.md` | 账号排名 + 典型笔记链接 + 高赞评论织入 | **人读 / 喂 LLM 做竞品分析的主入口** |
 | `topic_feed.md` + `topic_feed.jsonl` | 仅时间窗内的 watchlist 账号最新笔记，头部带出窗/缺时间计数对账 | **人读 / 下游选题项目的主入口** |
 | `account_profile.csv` | watchlist 账号专业度分项：垂直度（内容命中领域关键词占比）/ 窗内发帖数 / 综合分，可复算 | 机器 |
+| `creator_profiles.csv` | watchlist 账号官方主页档案：**verify_type（0未认证/1个人/2机构认证）** / red_id（小红书号）/ 粉丝 / 简介 / IP——机构判定 `verify_type==2` 机械可判 | 机器 |
 | `watchlist.csv` | 关注账号清单（manual/auto 来源标注） | 机器 |
 | `creator_notes.csv` | 每账号最新 N 篇原样导出（不窗过滤；互动列 0=未采集） | 机器 |
 | `accounts.csv` `notes.csv` | 全量账号/笔记明细 | 机器 |

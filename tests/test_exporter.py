@@ -258,3 +258,44 @@ def test_export_all_writes_topic_feed_when_passed(tmp_path):
     assert md.splitlines()[0] == "窗口 30 天 · 入 feed 3 条 · 出窗 1 · 缺时间 1 · 账号 2"
     assert md.index("## 作者乙（U2）") < md.index("## 作者甲（U1）")
     assert md.index("乙标题") < md.index("新标题") < md.index("旧标题")
+
+
+def test_export_watch_side_creator_profiles():
+    import csv
+    import tempfile
+    from pathlib import Path
+
+    from src.core.exporter import export_watch_side
+    from src.models import CreatorProfile
+
+    profiles = [
+        CreatorProfile(
+            account_id="a1",
+            nickname="机构A",
+            desc="教育科技",
+            fans=12000,
+            follows=100,
+            interaction=34000,
+            tags={"profession": "教育"},
+            ip_location="上海",
+        ),
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        paths = export_watch_side(Path(d), creator_profiles=profiles)
+        rows = list(csv.DictReader(open(paths["creator_profiles"], encoding="utf-8")))
+        assert rows[0]["account_id"] == "a1"
+        assert rows[0]["fans"] == "12000"
+        assert rows[0]["tags"] == "profession:教育"  # dict → 类型:名称
+        assert rows[0]["desc"] == "教育科技"
+
+
+def test_export_watch_side_no_profiles_omits_file():
+    import tempfile
+    from pathlib import Path
+
+    from src.core.exporter import export_watch_side
+
+    with tempfile.TemporaryDirectory() as d:
+        paths = export_watch_side(Path(d), watchlist=[])
+        assert "creator_profiles" not in paths  # None → 不写
+        assert not (Path(d) / "creator_profiles.csv").exists()

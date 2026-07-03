@@ -111,7 +111,7 @@ def test_cli_sync_backfills_latest_run_dir(tmp_path):
     assert result.exit_code == 0
     after = _snapshot(_run_dir(out))
 
-    # 同一目录补齐四件（jsonl+md 共五个文件名）
+    # 同一目录补齐 watchlist 侧文件（含档案，jsonl+md 各算一名）
     added = set(after) - set(before)
     assert added == {
         "watchlist.csv",
@@ -119,6 +119,7 @@ def test_cli_sync_backfills_latest_run_dir(tmp_path):
         "account_profile.csv",
         "topic_feed.md",
         "topic_feed.jsonl",
+        "creator_profiles.csv",
     }
     # 旧文件字节不变（评审 #1 阻塞1 的回归锁）
     for name in before:
@@ -244,3 +245,22 @@ def test_comments_stage_caps_typical_notes(monkeypatch):
     cfg = {"comments": {"enabled": True, "limit": 5, "max_notes": 3}}
     _comments_stage(cfg, adapter, typical, "2026")
     assert adapter.seen == [3]  # 只送前 3 条（按 note_score 降序）
+
+
+def test_cli_sync_produces_creator_profiles(tmp_path):
+    """档案落盘 e2e：sync 后同目录多出 creator_profiles.csv，旧文件字节不变。"""
+    out = tmp_path / "out"
+    cfg = _cfg(out)
+    cfg["creator_profiles_fixture_path"] = "tests/fixtures/creator_creators_sample.jsonl"
+    cfg_path = _write_cfg(tmp_path, "c.yaml", cfg)
+    assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
+    before = _snapshot(_run_dir(out))
+
+    assert runner.invoke(app, ["sync", "--config", cfg_path]).exit_code == 0
+    after = _snapshot(_run_dir(out))
+
+    assert "creator_profiles.csv" in set(after) - set(before)
+    for name in before:
+        assert after[name] == before[name], f"{name} 被 sync 改动"
+    # 601d... 在 watchlist manual + 档案夹具里 → 有档案行
+    assert b"601d0481000000000101cc46" in after["creator_profiles.csv"]

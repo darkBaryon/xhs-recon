@@ -135,3 +135,62 @@ def test_parse_comments_jsonl_lines_skips_blank_lines():
 
     assert [c.body for c in comments] == ["A", "B"]
     assert [c.like_count for c in comments] == [10, 0]
+
+
+def test_parse_creator_profiles_normalizes_counts_and_tags():
+    from src.adapters.parsers import parse_creator_profiles_jsonl_lines
+
+    lines = (
+        open("tests/fixtures/creator_creators_sample.jsonl", encoding="utf-8").read().splitlines()
+    )
+    profiles = parse_creator_profiles_jsonl_lines(lines, collected_at="2026")
+    assert len(profiles) == 2
+    p0 = profiles[0]
+    assert p0.account_id == "601d0481000000000101cc46"
+    assert p0.fans == 12000  # "1.2万" 归一
+    assert p0.interaction == 34000
+    assert p0.tags == {"profession": "教育", "info": "已认证"}  # tag_list JSON → dict
+    assert "教育科技" in p0.desc
+    assert profiles[1].tags == {}  # 空标签账号 → 空 dict
+    assert profiles[1].fans == 320  # 纯数字也走归一
+
+
+def test_parse_creator_profiles_bad_line_skipped():
+    from src.adapters.parsers import parse_creator_profiles_jsonl_lines
+
+    lines = ['{"user_id": "a", "fans": 10}', "{broken", "", '{"user_id": "b", "fans": 20}']
+    profiles = parse_creator_profiles_jsonl_lines(lines, collected_at="2026")
+    assert [p.account_id for p in profiles] == ["a", "b"]  # 坏行跳过，好行保留
+
+
+def test_parse_creator_profile_missing_fields_degrade():
+    from src.adapters.parsers import parse_creator_profiles_jsonl_lines
+
+    profiles = parse_creator_profiles_jsonl_lines(['{"user_id": "x"}'], collected_at="2026")
+    p = profiles[0]
+    assert p.account_id == "x"
+    assert p.fans == 0 and p.tags == {} and p.desc == "" and p.ip_location == ""
+
+
+def test_parse_tag_list_malformed_degrades_to_empty():
+    from src.adapters.parsers import _parse_tag_list
+
+    assert _parse_tag_list("not json") == {}
+    assert _parse_tag_list("[1,2]") == {}  # 非 dict JSON
+    assert _parse_tag_list(None) == {}
+    assert _parse_tag_list('{"a": "b"}') == {"a": "b"}
+
+
+def test_parse_creator_profile_verify_type_and_red_id():
+    from src.adapters.parsers import parse_creator_profiles_jsonl_lines
+
+    lines = [
+        '{"user_id": "a", "verify_type": 2, "red_id": "12345"}',  # 机构认证
+        '{"user_id": "b", "verify_type": 0, "red_id": "67890"}',  # 未认证
+        '{"user_id": "c"}',  # 旧版 fork 无此字段 → verify_type=-1 未知
+        '{"user_id": "d", "verify_type": "bad"}',  # 非法值 → -1
+    ]
+    ps = parse_creator_profiles_jsonl_lines(lines, collected_at="2026")
+    assert [p.verify_type for p in ps] == [2, 0, -1, -1]
+    assert ps[0].red_id == "12345"
+    assert ps[2].red_id == ""  # 缺字段降级空串

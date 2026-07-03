@@ -12,9 +12,13 @@ import subprocess
 from pathlib import Path
 from time import perf_counter
 
-from src.adapters.parsers import parse_comments_jsonl_lines, parse_jsonl_lines
+from src.adapters.parsers import (
+    parse_comments_jsonl_lines,
+    parse_creator_profiles_jsonl_lines,
+    parse_jsonl_lines,
+)
 from src.core.ports import ResearchAdapter
-from src.models import Account, FetchResult, Note, TypicalNote
+from src.models import Account, CreatorProfile, FetchResult, Note, TypicalNote
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +203,18 @@ class MediaCrawlerAdapter(ResearchAdapter):
             lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
         )
 
+    def _read_creator_profiles(self, save_path: Path, collected_at: str):
+        # 档案软信号：旧版 fork 无此文件 / 抓取失败 / 罕见 IO 异常 → 空列表，
+        # 不计失败不入 error（与同流程 _read_creator_results 的防御对称，代码评审 #1 建议）
+        try:
+            files = sorted(Path(save_path).glob("xhs/jsonl/creator_creators_*.jsonl"))
+            lines: list[str] = []
+            for f in files:
+                lines.extend(f.read_text(encoding="utf-8").splitlines())
+        except OSError:
+            return []
+        return parse_creator_profiles_jsonl_lines(lines, collected_at=collected_at)
+
     def _write_crawler_log(self, save_path: Path, text: str) -> None:
         try:
             save_path.mkdir(parents=True, exist_ok=True)
@@ -323,6 +339,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         failed_ids: list[str] = []
         notes: list[Note] = []
         accounts: list[Account] = []
+        profiles: list[CreatorProfile] = []
 
         for account_id in account_ids:
             save_path = save_root / account_id
@@ -348,6 +365,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
                 continue
             notes.extend(account_notes)
             accounts.extend(account_rows)
+            profiles.extend(self._read_creator_profiles(save_path, collected_at))
             # 每账号耗时留痕：多账号串行的总时长 = Σ单账号，复盘节奏用
             logger.debug(
                 "creator %s：%d 条 · %.1fs", account_id, len(account_notes), perf_counter() - t0
@@ -360,6 +378,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             collected_at=collected_at,
             notes=notes,
             accounts=accounts,
+            profiles=profiles,
             raw_path=str(save_root),
             error=error,
             command=" && ".join(commands),

@@ -1,6 +1,7 @@
 provider: fixture
 fixture_path: tests/fixtures/search_contents_sample.jsonl
 creator_fixture_path: tests/fixtures/creator_contents_sample.jsonl
+creator_profiles_fixture_path: tests/fixtures/creator_creators_sample.jsonl
 keywords: ["留学辅导"]
 synonyms:
   留学辅导: ["essay辅导", "final自救"]

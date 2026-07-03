@@ -349,3 +349,45 @@ def test_search_corrupt_jsonl_is_error_not_crash(tmp_path, monkeypatch):
     r = a.search("留学辅导", 1, 20, "2026-06-24T00:00:00Z")
     assert not r.ok
     assert "read results failed" in r.error
+
+
+def test_creator_reads_profiles_when_present(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    profile_line = (
+        '{"user_id": "aaaa", "nickname": "机构A", "fans": "2万",'
+        ' "tag_list": "{\\"profession\\": \\"教育\\"}"}'
+    )
+
+    def fake_run(cmd):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "creator_contents_2026.jsonl").write_text(
+            '{"note_id":"n1","user_id":"aaaa"}', encoding="utf-8"
+        )
+        (d / "creator_creators_2026.jsonl").write_text(profile_line, encoding="utf-8")
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["aaaa"], 5, "2026")
+    assert len(r.profiles) == 1
+    assert r.profiles[0].fans == 20000
+    assert r.profiles[0].tags == {"profession": "教育"}
+
+
+def test_creator_missing_profiles_file_degrades_empty(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "creator_contents_2026.jsonl").write_text(
+            '{"note_id":"n1","user_id":"aaaa"}', encoding="utf-8"
+        )
+        return 0, "ok"  # 旧版 fork：无 creator_creators 文件
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    r = a.fetch_creator_notes(["aaaa"], 5, "2026")
+    assert r.profiles == []  # 软降级，不入 error
+    assert r.ok
