@@ -8,7 +8,15 @@ import json
 from pathlib import Path
 
 from src.core.time_window import WindowFilterStats
-from src.models import Account, AccountRank, Comment, Note, TypicalNote, WatchAccount
+from src.models import (
+    Account,
+    AccountRank,
+    Comment,
+    CreatorProfile,
+    Note,
+    TypicalNote,
+    WatchAccount,
+)
 
 PIPE = "|"
 
@@ -155,8 +163,9 @@ def export_watch_side(
     topic_feed: list[Note] | None = None,
     topic_feed_stats: WindowFilterStats | None = None,
     topic_feed_window_days: int = 0,
+    creator_profiles: list[CreatorProfile] | None = None,
 ) -> dict[str, str]:
-    """watchlist 侧四件的子集出口（None = 不写）；export_all 委托，sync 命令单独调用。"""
+    """watchlist 侧子集出口（None = 不写）；export_all 委托，sync 命令单独调用。"""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     paths: dict[str, str] = {}
@@ -234,6 +243,33 @@ def export_watch_side(
         paths["topic_feed"] = _write_topic_feed_md(
             out / "topic_feed.md", topic_feed, stats, topic_feed_window_days, watchlist
         )
+    if creator_profiles is not None:
+        paths["creator_profiles"] = _write_csv(
+            out / "creator_profiles.csv",
+            [
+                "account_id",
+                "nickname",
+                "fans",
+                "follows",
+                "interaction",
+                "tags",
+                "desc",
+                "ip_location",
+            ],
+            [
+                [
+                    p.account_id,
+                    p.nickname,
+                    p.fans,
+                    p.follows,
+                    p.interaction,
+                    _join([f"{k}:{v}" for k, v in p.tags.items()]),
+                    p.desc,
+                    p.ip_location,
+                ]
+                for p in creator_profiles
+            ],
+        )
     return paths
 
 
@@ -276,6 +312,7 @@ def export_all(
     topic_feed: list[Note] | None = None,
     topic_feed_stats: WindowFilterStats | None = None,
     topic_feed_window_days: int = 0,
+    creator_profiles: list[CreatorProfile] | None = None,
 ) -> dict[str, str]:
     comments = comments or []
     out = Path(out_dir)
@@ -381,6 +418,7 @@ def export_all(
             topic_feed=topic_feed,
             topic_feed_stats=topic_feed_stats,
             topic_feed_window_days=topic_feed_window_days,
+            creator_profiles=creator_profiles,
         )
     )
     paths.update(

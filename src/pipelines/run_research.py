@@ -23,7 +23,16 @@ from src.core.note_selector import select_typical_notes
 from src.core.ports import ResearchAdapter
 from src.core.time_window import WindowFilterStats, filter_notes
 from src.core.watchlist import build_watchlist
-from src.models import Account, AccountRank, Comment, FetchResult, Note, TypicalNote, WatchAccount
+from src.models import (
+    Account,
+    AccountRank,
+    Comment,
+    CreatorProfile,
+    FetchResult,
+    Note,
+    TypicalNote,
+    WatchAccount,
+)
 from src.pipelines.logging_setup import _compact_run_id, configure_logging, log_result
 
 app = typer.Typer(add_completion=False)
@@ -150,6 +159,7 @@ class SyncArtifacts(BaseModel):
     account_profiles: list[AccountRank] | None = None
     topic_feed: list[Note] | None = None
     topic_feed_stats: WindowFilterStats | None = None
+    creator_profiles: list[CreatorProfile] | None = None
 
 
 def _search_stage(
@@ -215,6 +225,7 @@ def _sync_stage(
     )
 
     creator_notes: list[Note] = []
+    creator_profiles: list[CreatorProfile] = []
     if watchlist:
         creator_cfg = config.get("creator", {})
         try:
@@ -228,8 +239,10 @@ def _sync_stage(
         else:
             log_result(logger, creator_result)
             creator_notes = creator_result.notes
+            creator_profiles = creator_result.profiles
             watchlist = _backfill_watchlist_nicknames(watchlist, creator_result.accounts)
             logger.info("创作者笔记：采到 %d 条", len(creator_notes))
+            logger.info("创作者档案：%d 份", len(creator_profiles))
     else:
         logger.info("watchlist：为空，跳过创作者笔记采集")
 
@@ -256,6 +269,7 @@ def _sync_stage(
         account_profiles=account_profiles,
         topic_feed=topic_feed_notes,
         topic_feed_stats=topic_feed_stats,
+        creator_profiles=creator_profiles,
     )
 
 
@@ -345,6 +359,7 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
         topic_feed=sync.topic_feed,
         topic_feed_stats=sync.topic_feed_stats,
         topic_feed_window_days=config.get("search", {}).get("window_days", 0),
+        creator_profiles=sync.creator_profiles,
     )
     _update_latest_link(out_base, run_dir)
     logger.info("✓ 导出 %d 个文件 → %s", len(paths), run_dir)

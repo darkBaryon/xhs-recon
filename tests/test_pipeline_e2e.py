@@ -165,6 +165,7 @@ def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
         "account_profile",
         "topic_feed",
         "topic_feed_jsonl",
+        "creator_profiles",
     }
     for key in ["accounts", "notes", "account_rank", "typical_notes", "report_input"]:
         assert Path(watch_paths[key]).read_bytes() == Path(base_paths[key]).read_bytes()

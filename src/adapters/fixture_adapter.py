@@ -27,9 +27,7 @@ class FixtureAdapter(ResearchAdapter):
         self._path = Path(fixture_path)
         self._comments_path = Path(comments_path) if comments_path else None
         self._creator_path = Path(creator_path) if creator_path else None
-        self._creator_profiles_path = (
-            Path(creator_profiles_path) if creator_profiles_path else None
-        )
+        self._creator_profiles_path = Path(creator_profiles_path) if creator_profiles_path else None
 
     def search(self, keyword: str, page: int, limit: int, collected_at: str) -> FetchResult:
         logger.debug("fixture search path=%s page=%s limit=%s", self._path, page, limit)

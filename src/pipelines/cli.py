@@ -123,6 +123,7 @@ def sync(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
         topic_feed=artifacts.topic_feed,
         topic_feed_stats=artifacts.topic_feed_stats,
         topic_feed_window_days=cfg.get("search", {}).get("window_days", 0),
+        creator_profiles=artifacts.creator_profiles,
     )
     logger.info("✓ 补全写回 %d 个文件 → %s", len(paths), run_dir)
     _echo_paths(paths)
