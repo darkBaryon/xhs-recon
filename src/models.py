@@ -63,6 +63,20 @@ class WatchAccount(BaseModel):
     source: str
 
 
+class CreatorProfile(BaseModel):
+    """创作者主页档案（官方主页数据，机构判定用软信号）。"""
+
+    account_id: str
+    nickname: str = ""
+    desc: str = ""
+    fans: int = 0
+    follows: int = 0
+    interaction: int = 0
+    tags: dict[str, str] = {}
+    ip_location: str = ""
+    collected_at: str = ""
+
+
 class FetchResult(BaseModel):
     """采集+解析的边界产物。失败不抛，装进 error；core 只读 notes/accounts。"""
 
@@ -75,6 +89,7 @@ class FetchResult(BaseModel):
     notes: list[Note] = []
     accounts: list[Account] = []
     comments: list[Comment] = []
+    profiles: list[CreatorProfile] = []
     raw_path: str | None = None
     raw_text: str | None = None
     error: str | None = None
