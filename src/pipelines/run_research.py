@@ -38,6 +38,7 @@ def _build_adapter(config: dict) -> ResearchAdapter:
     provider = config.get("provider", "fixture")
     comments_path = config.get("comments", {}).get("fixture_path")
     creator_path = config.get("creator_fixture_path")
+    creator_profiles_path = config.get("creator_profiles_fixture_path")
     search_cfg = config.get("search", {})
     if provider == "mediacrawler":
         mc_dir = config["mediacrawler_dir"]
@@ -57,7 +58,10 @@ def _build_adapter(config: dict) -> ResearchAdapter:
         # 路径 (a)：MediaCrawler 目录不可用 → 启动降级 fixture
         return FixtureAdapter(config["fixture_path"], comments_path=comments_path)
     return FixtureAdapter(
-        config["fixture_path"], comments_path=comments_path, creator_path=creator_path
+        config["fixture_path"],
+        comments_path=comments_path,
+        creator_path=creator_path,
+        creator_profiles_path=creator_profiles_path,
     )
 
 

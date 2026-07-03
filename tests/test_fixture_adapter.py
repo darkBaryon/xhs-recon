@@ -86,3 +86,27 @@ def test_fetch_creator_notes_keeps_file_order_after_filtering():
     )
 
     assert [n.title for n in r.notes] == ["第二账号第一条主页笔记", "第二账号第二条主页笔记"]
+
+
+def test_fixture_creator_notes_reads_profiles():
+    from src.adapters.fixture_adapter import FixtureAdapter
+
+    adapter = FixtureAdapter(
+        "tests/fixtures/search_contents_sample.jsonl",
+        creator_path="tests/fixtures/creator_contents_sample.jsonl",
+        creator_profiles_path="tests/fixtures/creator_creators_sample.jsonl",
+    )
+    result = adapter.fetch_creator_notes(["601d0481000000000101cc46"], 5, "2026")
+    assert [p.account_id for p in result.profiles] == ["601d0481000000000101cc46"]
+    assert result.profiles[0].fans == 12000
+
+
+def test_fixture_creator_notes_no_profiles_path_degrades_empty():
+    from src.adapters.fixture_adapter import FixtureAdapter
+
+    adapter = FixtureAdapter(
+        "tests/fixtures/search_contents_sample.jsonl",
+        creator_path="tests/fixtures/creator_contents_sample.jsonl",
+    )
+    result = adapter.fetch_creator_notes(["601d0481000000000101cc46"], 5, "2026")
+    assert result.profiles == []  # 未配档案路径 → 软降级空列表

@@ -3,7 +3,11 @@
 import logging
 from pathlib import Path
 
-from src.adapters.parsers import parse_comments_jsonl_lines, parse_jsonl_lines
+from src.adapters.parsers import (
+    parse_comments_jsonl_lines,
+    parse_creator_profiles_jsonl_lines,
+    parse_jsonl_lines,
+)
 from src.core.ports import ResearchAdapter
 from src.models import FetchResult, TypicalNote
 
@@ -18,10 +22,14 @@ class FixtureAdapter(ResearchAdapter):
         fixture_path: str,
         comments_path: str | None = None,
         creator_path: str | None = None,
+        creator_profiles_path: str | None = None,
     ):
         self._path = Path(fixture_path)
         self._comments_path = Path(comments_path) if comments_path else None
         self._creator_path = Path(creator_path) if creator_path else None
+        self._creator_profiles_path = (
+            Path(creator_profiles_path) if creator_profiles_path else None
+        )
 
     def search(self, keyword: str, page: int, limit: int, collected_at: str) -> FetchResult:
         logger.debug("fixture search path=%s page=%s limit=%s", self._path, page, limit)
@@ -122,12 +130,27 @@ class FixtureAdapter(ResearchAdapter):
             notes.append(note)
             accounts.append(account)
 
+        profiles = self._read_creator_profiles(wanted, collected_at)
         return FetchResult(
             provider=self.provider_name,
             operation="creator_notes",
             collected_at=collected_at,
             notes=notes,
             accounts=accounts,
+            profiles=profiles,
             raw_path=str(self._creator_path),
             raw_text=text,
         )
+
+    def _read_creator_profiles(self, wanted: set[str], collected_at: str):
+        # 档案是软信号：未配路径或读不到 → 空列表，不报错
+        if self._creator_profiles_path is None:
+            return []
+        try:
+            text = self._creator_profiles_path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        all_profiles = parse_creator_profiles_jsonl_lines(
+            text.splitlines(), collected_at=collected_at
+        )
+        return [p for p in all_profiles if p.account_id in wanted]
