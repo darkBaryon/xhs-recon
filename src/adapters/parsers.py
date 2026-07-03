@@ -134,10 +134,22 @@ def _parse_tag_list(raw) -> dict[str, str]:
     return {str(k): str(v) for k, v in data.items()}
 
 
+def _verify_type(raw) -> int:
+    # 官方认证类型：缺字段（旧版 fork）或非法值 → -1（未知，区别于 0=未认证）
+    if raw is None:
+        return -1
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return -1
+
+
 def parse_creator_profile(row: dict, *, collected_at: str) -> CreatorProfile:
     return CreatorProfile(
         account_id=row.get("user_id", ""),
         nickname=row.get("nickname", ""),
+        red_id=str(row.get("red_id") or ""),
+        verify_type=_verify_type(row.get("verify_type")),
         desc=row.get("desc") or "",
         fans=normalize_count(row.get("fans")),
         follows=normalize_count(row.get("follows")),

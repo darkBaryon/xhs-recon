@@ -68,6 +68,8 @@ class CreatorProfile(BaseModel):
 
     account_id: str
     nickname: str = ""
+    red_id: str = ""  # 小红书号（App 搜索用标识）
+    verify_type: int = -1  # 官方认证：0未认证/1个人/2机构；-1=档案未含该字段（旧版 fork）
     desc: str = ""
     fans: int = 0
     follows: int = 0

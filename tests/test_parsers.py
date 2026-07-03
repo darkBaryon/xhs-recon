@@ -179,3 +179,18 @@ def test_parse_tag_list_malformed_degrades_to_empty():
     assert _parse_tag_list("[1,2]") == {}  # 非 dict JSON
     assert _parse_tag_list(None) == {}
     assert _parse_tag_list('{"a": "b"}') == {"a": "b"}
+
+
+def test_parse_creator_profile_verify_type_and_red_id():
+    from src.adapters.parsers import parse_creator_profiles_jsonl_lines
+
+    lines = [
+        '{"user_id": "a", "verify_type": 2, "red_id": "12345"}',  # 机构认证
+        '{"user_id": "b", "verify_type": 0, "red_id": "67890"}',  # 未认证
+        '{"user_id": "c"}',  # 旧版 fork 无此字段 → verify_type=-1 未知
+        '{"user_id": "d", "verify_type": "bad"}',  # 非法值 → -1
+    ]
+    ps = parse_creator_profiles_jsonl_lines(lines, collected_at="2026")
+    assert [p.verify_type for p in ps] == [2, 0, -1, -1]
+    assert ps[0].red_id == "12345"
+    assert ps[2].red_id == ""  # 缺字段降级空串

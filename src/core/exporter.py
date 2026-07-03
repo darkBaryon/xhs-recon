@@ -249,6 +249,8 @@ def export_watch_side(
             [
                 "account_id",
                 "nickname",
+                "verify_type",
+                "red_id",
                 "fans",
                 "follows",
                 "interaction",
@@ -260,6 +262,8 @@ def export_watch_side(
                 [
                     p.account_id,
                     p.nickname,
+                    p.verify_type,
+                    p.red_id,
                     p.fans,
                     p.follows,
                     p.interaction,
