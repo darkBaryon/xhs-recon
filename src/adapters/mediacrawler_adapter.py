@@ -204,11 +204,15 @@ class MediaCrawlerAdapter(ResearchAdapter):
         )
 
     def _read_creator_profiles(self, save_path: Path, collected_at: str):
-        # 档案软信号：旧版 fork 无此文件 / 抓取失败 → 空列表，不计失败不入 error
-        files = sorted(Path(save_path).glob("xhs/jsonl/creator_creators_*.jsonl"))
-        lines: list[str] = []
-        for f in files:
-            lines.extend(f.read_text(encoding="utf-8").splitlines())
+        # 档案软信号：旧版 fork 无此文件 / 抓取失败 / 罕见 IO 异常 → 空列表，
+        # 不计失败不入 error（与同流程 _read_creator_results 的防御对称，代码评审 #1 建议）
+        try:
+            files = sorted(Path(save_path).glob("xhs/jsonl/creator_creators_*.jsonl"))
+            lines: list[str] = []
+            for f in files:
+                lines.extend(f.read_text(encoding="utf-8").splitlines())
+        except OSError:
+            return []
         return parse_creator_profiles_jsonl_lines(lines, collected_at=collected_at)
 
     def _write_crawler_log(self, save_path: Path, text: str) -> None:
