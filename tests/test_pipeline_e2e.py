@@ -112,9 +112,9 @@ def test_pipeline_end_to_end(tmp_path):
 
 
 def test_pipeline_without_watchlist_does_not_call_fetch_creator_notes(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     monkeypatch.setattr(
-        "src.pipelines.run_research._build_adapter",
+        "src.pipelines.runtime.build_adapter",
         lambda config: _NoCreatorCallAdapter("tests/fixtures/search_contents_sample.jsonl"),
     )
     cfg = _cfg(tmp_path)
@@ -133,7 +133,7 @@ def test_pipeline_without_watchlist_does_not_call_fetch_creator_notes(tmp_path, 
 def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     base_cfg = _cfg(tmp_path / "base")
     watch_cfg = _cfg(tmp_path / "watch")
     watch_cfg["creator_fixture_path"] = "tests/fixtures/creator_contents_sample.jsonl"
@@ -196,7 +196,7 @@ def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
 
 
 def test_pipeline_invalid_manual_ref_fails_fast(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     cfg = _cfg(tmp_path)
     cfg["watchlist"] = {
         "auto_top_n": 0,
@@ -216,7 +216,7 @@ def test_pipeline_invalid_manual_ref_fails_fast(tmp_path, monkeypatch, capsys):
 def test_pipeline_adapter_without_creator_support_exports_empty_creator_header(
     tmp_path, monkeypatch, caplog
 ):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     cfg = _cfg(tmp_path)
     cfg["watchlist"] = {
         "auto_top_n": 0,
@@ -241,9 +241,9 @@ def test_pipeline_adapter_without_creator_support_exports_empty_creator_header(
 def test_pipeline_partial_creator_failure_still_exports_success_notes(
     tmp_path, monkeypatch, caplog
 ):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     monkeypatch.setattr(
-        "src.pipelines.run_research._build_adapter",
+        "src.pipelines.runtime.build_adapter",
         lambda config: _PartialCreatorAdapter(),
     )
     cfg = _cfg(tmp_path)
@@ -272,7 +272,7 @@ def test_pipeline_partial_creator_failure_still_exports_success_notes(
 
 
 def test_pipeline_window_filters_before_aggregate(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026-07-02T00:00:00+00:00")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026-07-02T00:00:00+00:00")
     cfg = _cfg(tmp_path)
     cfg["search"]["window_days"] = 30
     cfg_path = tmp_path / "cfg.yaml"
@@ -291,7 +291,7 @@ def test_pipeline_topic_feed_keeps_only_window_notes_and_counts_stats(
     tmp_path, monkeypatch, caplog
 ):
     now_iso = "2026-07-03T00:00:00+00:00"
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: now_iso)
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: now_iso)
     cfg = _cfg(tmp_path)
     cfg["search"]["window_days"] = 30
     cfg["creator_fixture_path"] = "tests/fixtures/creator_contents_sample.jsonl"
@@ -355,7 +355,7 @@ def test_pipeline_topic_feed_keeps_only_window_notes_and_counts_stats(
 
 
 def test_pipeline_end_to_end_with_comments(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     cfg = _cfg(tmp_path)
     cfg["comments"] = {
         "enabled": True,
@@ -394,7 +394,7 @@ def test_pipeline_end_to_end_with_comments(tmp_path, monkeypatch):
 
 
 def test_pipeline_comments_disabled_matches_phase2_outputs(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     base_dir = tmp_path / "base"
     disabled_dir = tmp_path / "disabled"
     base_cfg = _cfg(base_dir)
@@ -426,7 +426,7 @@ def test_pipeline_comments_disabled_matches_phase2_outputs(tmp_path, monkeypatch
 
 
 def test_pipeline_window_all_keep_and_decay_compares_note_id_projection(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026-07-02T00:00:00+00:00")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026-07-02T00:00:00+00:00")
     base_dir = tmp_path / "base"
     recency_dir = tmp_path / "recency"
     base_cfg = _cfg(base_dir)

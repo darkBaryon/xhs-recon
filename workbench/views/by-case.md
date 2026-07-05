@@ -110,6 +110,7 @@
 
 | 需求 | 状态 |
 |---|---|
+| [代码结构重构（exporter/adapter/config/runtime/progress 五项）](../reports/代码结构重构.md) | 已交付 |
 | [导出按运行归档](../reports/导出按运行归档.md) | 已交付 |
 | [并行开发规范](../reports/并行开发规范.md) | 已交付 |
 | [评论段进行时提示](../reports/评论段进行时提示.md) | 已交付 |

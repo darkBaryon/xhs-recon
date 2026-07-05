@@ -6,6 +6,7 @@
 #   ./run.sh comments   # 真实·深读：补采评论（做深度分析时）
 #   ./run.sh real       # 真实·全流程（= research）
 #   ./run.sh browser    # 只启动/检查采集浏览器（专用 profile + CDP 9222）
+#   ./run.sh web        # 把最新一跑渲染成本地静态站并打开（离线，无需采集）
 # 主题配置默认 configs/留学辅导/run.yaml，换赛道：CONFIG=configs/<主题>/run.yaml ./run.sh sync
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -93,8 +94,15 @@ case "$cmd" in
   browser)
     ensure_browser
     ;;
+  web)
+    # 把最新一跑的导出渲染成本地静态站并打开（离线，无需采集浏览器/锁）
+    line="$(uv run python -m src.pipelines.cli web --config "$CONFIG" "$@")"
+    echo "$line"
+    path="${line#web: }"
+    [ -n "$path" ] && [ -f "$path" ] && command -v open >/dev/null 2>&1 && open "$path"
+    ;;
   *)
-    echo "用法: ./run.sh [demo|search|sync|comments|real|browser]" >&2
+    echo "用法: ./run.sh [demo|search|sync|comments|real|browser|web]" >&2
     exit 2
     ;;
 esac

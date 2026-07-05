@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.pipelines.run_research import _resolve_config_refs, run_research
+from src.pipelines.run_research import run_research
+from src.pipelines.runtime import resolve_config_refs as _resolve_config_refs
 
 
 def _write_yaml(path: Path, data: dict) -> str:

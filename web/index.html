@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>竞品情报快照 · 留学辅导</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="shell">
+      <header>
+        <p class="eyebrow">竞品情报快照 · 留学辅导</p>
+        <h1 id="title"></h1>
+        <div class="runmeta" id="runmeta"></div>
+        <div class="tiles" id="tiles"></div>
+      </header>
+
+      <div class="bar">
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" aria-selected="true" id="tab-acc" data-view="acc">账号视图</button>
+          <button class="tab" role="tab" aria-selected="false" id="tab-feed" data-view="feed">选题流</button>
+        </div>
+        <label class="filter" id="vfwrap"><input type="checkbox" id="vfonly"> 仅看机构认证</label>
+        <span class="count" id="count"></span>
+      </div>
+
+      <div id="view-acc"><div class="grid" id="grid"></div></div>
+      <div id="view-feed" class="hidden"><div class="feed" id="feedlist"></div></div>
+
+      <footer id="foot"></footer>
+    </div>
+  </div>
+
+  <!-- 生成时注入的运行数据（window.DATA），必须在 app.js 之前 -->
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

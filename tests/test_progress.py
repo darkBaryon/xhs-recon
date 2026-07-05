@@ -8,6 +8,7 @@ from rich.console import Console
 import src.pipelines.run_research as run_research
 from src.models import FetchResult
 from src.pipelines import progress
+from src.pipelines.config import RunConfig
 
 
 def _tty_console(buf: io.StringIO) -> Console:
@@ -186,7 +187,7 @@ def test_sync_stage_injects_and_resets_progress_callback(monkeypatch):
 
     monkeypatch.setattr(progress, "creator_progress", fake_creator_progress)
     adapter = _StubProgressAdapter()
-    config = {"watchlist": {"manual": ["601d0481000000000101cc46"]}}
+    config = RunConfig.model_validate({"watchlist": {"manual": ["601d0481000000000101cc46"]}})
 
     run_research._sync_stage(config, adapter, "2026-07-03T00:00:00Z", [])
 
@@ -201,7 +202,7 @@ def test_sync_stage_non_tty_leaves_adapter_callback_unset(monkeypatch):
 
     monkeypatch.setattr(progress, "creator_progress", fake_creator_progress)
     adapter = _StubProgressAdapter()
-    config = {"watchlist": {"manual": ["601d0481000000000101cc46"]}}
+    config = RunConfig.model_validate({"watchlist": {"manual": ["601d0481000000000101cc46"]}})
 
     run_research._sync_stage(config, adapter, "2026-07-03T00:00:00Z", [])
 
@@ -220,10 +221,12 @@ def test_search_stage_uses_search_many_and_injects_progress(monkeypatch):
 
     monkeypatch.setattr(progress, "search_progress", fake_search_progress)
     adapter = _StubSearchManyAdapter()
-    config = {
-        "keywords": ["留学", "essay"],
-        "search": {"pages": 1, "limit": 20},
-    }
+    config = RunConfig.model_validate(
+        {
+            "keywords": ["留学", "essay"],
+            "search": {"pages": 1, "limit": 20},
+        }
+    )
 
     run_research._search_stage(config, adapter, "2026-07-03T00:00:00Z")
 
@@ -243,10 +246,12 @@ def test_search_stage_progress_uses_configured_limit(monkeypatch):
 
     monkeypatch.setattr(progress, "search_progress", fake_search_progress)
     adapter = _StubSearchManyAdapter()
-    config = {
-        "keywords": ["留学"],
-        "search": {"pages": 1, "limit": 12},
-    }
+    config = RunConfig.model_validate(
+        {
+            "keywords": ["留学"],
+            "search": {"pages": 1, "limit": 12},
+        }
+    )
 
     run_research._search_stage(config, adapter, "2026-07-03T00:00:00Z")
 

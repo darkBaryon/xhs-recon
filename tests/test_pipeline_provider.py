@@ -1,9 +1,15 @@
 from src.adapters.fixture_adapter import FixtureAdapter
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
-from src.pipelines.run_research import _build_adapter
+from src.pipelines.config import RunConfig
+from src.pipelines.runtime import build_adapter as _build_adapter_cfg
 
 FIXTURE = "tests/fixtures/search_contents_sample.jsonl"
 CREATOR = "tests/fixtures/creator_contents_sample.jsonl"
+
+
+def _build_adapter(cfg: dict):
+    """单测便捷入口：裸 dict → RunConfig → _build_adapter（生产签名已收 RunConfig）。"""
+    return _build_adapter_cfg(RunConfig.model_validate(cfg))
 
 
 def test_mediacrawler_missing_dir_falls_back_to_fixture():

@@ -107,21 +107,17 @@ class MediaCrawlerAdapter(ResearchAdapter):
     def _search_session_save_path(self, collected_at: str) -> Path:
         return self._save_path(collected_at) / "search"
 
-    def _build_search_command(
-        self, keywords: list[str], start_page: int, pages: int, limit: int, save_path: Path
-    ) -> list[str]:
-        # MC 的 --keywords 支持逗号分隔；内部在同一个 browser/page 会话里顺序循环。
-        # 小红书搜索页固定最多 20 条/页；MediaCrawler 会按 limit 截断详情采集。
-        crawler_max_notes = max(limit or self.max_notes, 1) * max(pages, 1)
-        cmd = [
+    def _base_command(self, save_path: Path) -> list[str]:
+        """三种会话（search/detail/creator）共享的启动与合规 flag。
+
+        --type 及各自的主选择器（--keywords/--specified_id/--creator_id）由调用方拼接。
+        合规红线在此集中：关代理池、单并发（构造可配）、按 sleep_sec 间隔请求。
+        """
+        return [
             *self.launcher,
             "main.py",
             "--platform",
             "xhs",
-            "--type",
-            "search",
-            "--keywords",
-            ",".join(keywords),
             "--lt",
             self.login_type,
             "--save_data_option",
@@ -130,21 +126,38 @@ class MediaCrawlerAdapter(ResearchAdapter):
             str(save_path),
             "--enable_ip_proxy",
             "no",
+            "--max_concurrency_num",
+            str(self.max_concurrency),
+            "--crawler_max_sleep_sec",
+            str(self.sleep_sec),
+        ]
+
+    def _append_cookies(self, cmd: list[str]) -> list[str]:
+        if self.cookies:
+            cmd += ["--cookies", self.cookies]
+        return cmd
+
+    def _build_search_command(
+        self, keywords: list[str], start_page: int, pages: int, limit: int, save_path: Path
+    ) -> list[str]:
+        # MC 的 --keywords 支持逗号分隔；内部在同一个 browser/page 会话里顺序循环。
+        # 小红书搜索页固定最多 20 条/页；MediaCrawler 会按 limit 截断详情采集。
+        crawler_max_notes = max(limit or self.max_notes, 1) * max(pages, 1)
+        cmd = self._base_command(save_path) + [
+            "--type",
+            "search",
+            "--keywords",
+            ",".join(keywords),
             "--get_comment",
             "no",
             "--get_sub_comment",
             "no",
-            "--max_concurrency_num",
-            str(self.max_concurrency),
             "--crawler_max_notes_count",
             str(crawler_max_notes),
-            "--crawler_max_sleep_sec",
-            str(self.sleep_sec),
             "--start",
             str(start_page),
         ]
-        if self.cookies:
-            cmd += ["--cookies", self.cookies]
+        self._append_cookies(cmd)
         if self.sort_type:
             cmd += ["--sort_type", self.sort_type]
         return cmd
@@ -153,11 +166,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return self._build_search_command([keyword], page, 1, limit, save_path)
 
     def _build_comments_command(self, urls: list[str], limit: int, save_path: Path) -> list[str]:
-        cmd = [
-            *self.launcher,
-            "main.py",
-            "--platform",
-            "xhs",
+        cmd = self._base_command(save_path) + [
             "--type",
             "detail",
             "--specified_id",
@@ -168,60 +177,27 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "no",
             "--max_comments_count_singlenotes",
             str(limit),
-            "--save_data_option",
-            "jsonl",
-            "--save_data_path",
-            str(save_path),
-            "--enable_ip_proxy",
-            "no",
-            "--max_concurrency_num",
-            str(self.max_concurrency),
-            "--crawler_max_sleep_sec",
-            str(self.sleep_sec),
-            "--lt",
-            self.login_type,
         ]
-        if self.cookies:
-            cmd += ["--cookies", self.cookies]
-        return cmd
+        return self._append_cookies(cmd)
 
     def _build_creator_command(
         self, account_ids: list[str], limit: int, save_path: Path
     ) -> list[str]:
-        # 单会话多账号：--creator_id 接受逗号分隔列表，MC 在一次会话里顺序拉完
-        # （省掉逐账号的浏览器启动开销）；默认 --max_concurrency_num 1 保持单并发，
-        # 会话内仍按 CRAWLER_MAX_SLEEP_SEC 间隔请求，速率不放大（合规红线不动）。
-        cmd = [
-            *self.launcher,
-            "main.py",
-            "--platform",
-            "xhs",
+        # 单会话多账号:--creator_id 接受逗号分隔列表，MC 在一次会话里顺序拉完
+        # （省掉逐账号的浏览器启动开销）；单并发与 sleep 间隔来自 _base_command，速率不放大。
+        cmd = self._base_command(save_path) + [
             "--type",
             "creator",
             "--creator_id",
             ",".join(account_ids),
-            "--lt",
-            self.login_type,
-            "--save_data_option",
-            "jsonl",
-            "--save_data_path",
-            str(save_path),
-            "--enable_ip_proxy",
-            "no",
             "--get_comment",
             "no",
             "--get_sub_comment",
             "no",
-            "--max_concurrency_num",
-            str(self.max_concurrency),
             "--crawler_max_notes_count",
             str(limit or self.max_notes),
-            "--crawler_max_sleep_sec",
-            str(self.sleep_sec),
         ]
-        if self.cookies:
-            cmd += ["--cookies", self.cookies]
-        return cmd
+        return self._append_cookies(cmd)
 
     def _run_crawler(
         self,
@@ -270,13 +246,17 @@ class MediaCrawlerAdapter(ResearchAdapter):
             reader.join(timeout=5)
         return rc, "".join(lines)
 
+    def _read_jsonl(self, save_path: Path, pattern: str) -> list[str]:
+        """按 glob 收集 MC 落盘的 JSONL 行（多文件合并，按文件名排序）。"""
+        lines: list[str] = []
+        for f in sorted(Path(save_path).glob(pattern)):
+            lines.extend(f.read_text(encoding="utf-8").splitlines())
+        return lines
+
     def _read_results(
         self, save_path: Path, keyword: str, collected_at: str
     ) -> tuple[list[Note], list[Account]]:
-        files = sorted(Path(save_path).glob("xhs/jsonl/search_contents_*.jsonl"))
-        lines: list[str] = []
-        for f in files:
-            lines.extend(f.read_text(encoding="utf-8").splitlines())
+        lines = self._read_jsonl(save_path, "xhs/jsonl/search_contents_*.jsonl")
         return parse_jsonl_lines(
             lines, keyword=keyword, collected_at=collected_at, raw_path=str(save_path)
         )
@@ -298,19 +278,13 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return buckets
 
     def _read_comments(self, save_path: Path, collected_at: str):
-        files = sorted(Path(save_path).glob("xhs/jsonl/*_comments_*.jsonl"))
-        lines: list[str] = []
-        for f in files:
-            lines.extend(f.read_text(encoding="utf-8").splitlines())
+        lines = self._read_jsonl(save_path, "xhs/jsonl/*_comments_*.jsonl")
         return parse_comments_jsonl_lines(lines, collected_at=collected_at)
 
     def _read_creator_results(
         self, save_path: Path, collected_at: str
     ) -> tuple[list[Note], list[Account]]:
-        files = sorted(Path(save_path).glob("xhs/jsonl/creator_contents_*.jsonl"))
-        lines: list[str] = []
-        for f in files:
-            lines.extend(f.read_text(encoding="utf-8").splitlines())
+        lines = self._read_jsonl(save_path, "xhs/jsonl/creator_contents_*.jsonl")
         return parse_jsonl_lines(
             lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
         )
@@ -319,10 +293,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         # 档案软信号：旧版 fork 无此文件 / 抓取失败 / 罕见 IO 异常 → 空列表，
         # 不计失败不入 error（与同流程 _read_creator_results 的防御对称，代码评审 #1 建议）
         try:
-            files = sorted(Path(save_path).glob("xhs/jsonl/creator_creators_*.jsonl"))
-            lines: list[str] = []
-            for f in files:
-                lines.extend(f.read_text(encoding="utf-8").splitlines())
+            lines = self._read_jsonl(save_path, "xhs/jsonl/creator_creators_*.jsonl")
         except OSError:
             return []
         return parse_creator_profiles_jsonl_lines(lines, collected_at=collected_at)

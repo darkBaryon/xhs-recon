@@ -6,6 +6,7 @@
     - [需求报告](需求报告.md)
 - 需求
     - [专业账号追踪与最新发帖](reports/专业账号追踪.md)
+    - [代码结构重构（exporter/adapter/config/runtime/progress 五项）](reports/代码结构重构.md)
     - [创作者档案落盘与认证信号（fork jsonl store_creator + creator_profiles.csv）](reports/创作者档案落盘.md)
     - [导出按运行归档](reports/导出按运行归档.md)
     - [小红书竞品研究工具 v0](reports/小红书竞品研究工具v0.md)

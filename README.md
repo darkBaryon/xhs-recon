@@ -27,6 +27,7 @@
 ./run.sh comments   # 真实·深读：补采评论（做深度分析时）
 ./run.sh real       # 真实·全流程（= research）
 ./run.sh browser    # 只起/查采集浏览器
+./run.sh report     # 把最新一跑的导出渲染成自包含 index.html 并打开（离线，无需采集）
 ```
 
 推荐顺序 `search → sync → comments`：search 建当次运行目录，sync/comments **补全写回**同一目录（`latest` 始终指向这份逐步补全的研究快照）；sync 的 auto 名额读最近一次 search 的榜单（缺榜单则纯 manual）。等价直调：`uv run python -m src.pipelines.cli <子命令> --config configs/留学辅导/run.yaml`；旧入口 `python -m src.pipelines.run_research --config ...` 不变。
@@ -69,7 +70,7 @@ curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 
 ## 产出（`data/exports/<时间戳>/`，按运行归档不覆盖）
 
-每次运行导出到独立时间戳目录（与 `data/logs/run-*.log` 同一时间戳，可互相对上）；`data/exports/latest/` 软链永远指向最新一次——**日常看 `data/exports/latest/report_input.md` 即可**。
+每次运行导出到独立时间戳目录（与 `data/logs/run-*.log` 同一时间戳，可互相对上）；`data/exports/latest/` 软链永远指向最新一次——**日常看 `data/exports/latest/report_input.md`，或 `./run.sh report` 生成可视化 `index.html`（账号情报卡 + 选题流两视图，离线 file:// 直接开）**。
 
 | 文件 | 内容 | 给谁 |
 |---|---|---|

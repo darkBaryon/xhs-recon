@@ -25,7 +25,7 @@ def _cfg(out_dir: Path) -> dict:
 
 
 def test_run_research_logs_stage_lines_and_keyword(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(_cfg(tmp_path / "out"), allow_unicode=True))
 
@@ -45,7 +45,7 @@ def test_run_research_logs_stage_lines_and_keyword(tmp_path, monkeypatch, caplog
 
 
 def test_run_research_logs_search_error_as_warning(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     cfg = _cfg(tmp_path / "out")
     cfg["fixture_path"] = "tests/fixtures/missing.jsonl"
     cfg["comments"] = {"enabled": False}
@@ -62,7 +62,7 @@ def test_run_research_logs_search_error_as_warning(tmp_path, monkeypatch, caplog
 
 
 def test_logs_do_not_include_comment_body_or_identity_fields(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026-log-redline")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026-log-redline")
     log_dir = tmp_path / "logs"
     cfg = _cfg(tmp_path / "out")
     cfg["logging"] = {"level": "debug", "dir": str(log_dir), "file_enabled": True}
@@ -87,7 +87,7 @@ def test_logs_do_not_include_comment_body_or_identity_fields(tmp_path, monkeypat
 
 
 def test_logging_options_do_not_change_export_bytes(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     expected: dict[str, bytes] | None = None
 
     for file_enabled in [True, False]:

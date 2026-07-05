@@ -81,3 +81,4 @@
 | [管线子命令拆分 验收记录](../cases/管线子命令拆分/验收记录.md) | 验收记录 | 管线子命令拆分 |  | 2026-07-03 |
 | [创作者档案落盘与认证信号（fork jsonl store_creator + creator_profiles.csv）](../reports/创作者档案落盘.md) | 需求 | 创作者档案落盘 | 已交付 | 2026-07-03 |
 | [管线子命令拆分（search/sync/comments 独立入口）](../reports/管线子命令拆分.md) | 需求 | 管线子命令拆分 | 已交付 | 2026-07-03 |
+| [代码结构重构（exporter/adapter/config/runtime/progress 五项）](../reports/代码结构重构.md) | 需求 | 代码结构重构 | 已交付 | 2026-07-04 |

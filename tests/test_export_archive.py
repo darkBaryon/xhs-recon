@@ -21,7 +21,7 @@ def _cfg(out_dir: Path) -> dict:
 
 def test_each_run_gets_own_dir_and_latest_points_newest(tmp_path, monkeypatch):
     run_ids = iter(["2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00"])
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: next(run_ids))
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: next(run_ids))
     out_base = tmp_path / "exports"
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(_cfg(out_base), allow_unicode=True))
@@ -44,7 +44,7 @@ def test_each_run_gets_own_dir_and_latest_points_newest(tmp_path, monkeypatch):
 
 
 def test_latest_not_symlink_is_left_alone(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.pipelines.run_research._now_iso", lambda: "2026-01-03T00:00:00+00:00")
+    monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026-01-03T00:00:00+00:00")
     out_base = tmp_path / "exports"
     out_base.mkdir(parents=True)
     (out_base / "latest").mkdir()  # 同名实体目录（异常情形），不得被删改
