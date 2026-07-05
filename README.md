@@ -1,6 +1,6 @@
 # xhs-recon — 小红书竞品研究工具
 
-个人自用、本地运行的小红书竞品研究管线：给定 seed keywords 与关注账号，自动完成**搜索 → 提取 → 打分 → 盯账号 → 选典型 → 读评论 → 导出**，产出可直接喂给 LLM 做竞品分析与选题的结构化资料。
+个人自用、本地运行的小红书领域研究管线：给定 seed keywords 与关注账号，自动完成**搜索 → 提取 → 打分 → 盯账号 → 选典型 → 读评论 → 导出**，产出可直接喂给 LLM / 下游程序做领域分析的结构化资料（关键词、扩展词、账号、笔记、评论等全量工作）。
 
 ```
 关键词扩展 → 只读搜索（MediaCrawler / 离线 fixture，时间序 + 时间窗过滤）
@@ -8,7 +8,7 @@
   → watchlist 合成（手动账号 + 榜单自动 top-N）→ creator 模式取每账号最新 N 篇
   → 专业度分项打分（垂直度/活跃度）→ 每账号选典型笔记（互动 × 时间衰减）
   → 批量读典型笔记一级评论（可选）
-  → 导出 data/exports/（8 个 CSV + report_input.md + topic_feed.md/jsonl）
+  → 导出 data/exports/（9 个 CSV + report_input.md；可再 web 渲染 / bundle 打包）
 ```
 
 **v0 三期已全部交付**：期1 fixture 管线 · 期2 MediaCrawler 真实采集 · 期3 典型笔记评论。
@@ -39,7 +39,7 @@
 uv run python -m src.pipelines.run_research --config configs/sample.yaml
 ```
 
-吃 `tests/fixtures/` 样本（含 creator 夹具，watchlist 全路径），产出完整 11 文件，用于开发自测与了解产出格式。
+吃 `tests/fixtures/` 样本（含 creator 夹具，watchlist 全路径），产出完整 10 文件，用于开发自测与了解产出格式。
 
 ### 真实采集（manual）
 
@@ -57,7 +57,7 @@ curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 
 首次在该窗口登录小红书（扫码一次），登录态存在专用 profile 里，**之后每次采集免登录**；该窗口与日常 Chrome 互不影响。采集期间不要操作该窗口。
 
-**跑（完整管线，含 watchlist/creator/选题素材）：**
+**跑（完整管线，含 watchlist/creator/专业度素材）：**
 
 ```bash
 ./run.sh real    # 或直调：uv run python -m src.pipelines.cli research --config configs/留学辅导/run.yaml
@@ -71,12 +71,11 @@ curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 
 ## 产出（`data/exports/<时间戳>/`，按运行归档不覆盖）
 
-每次运行导出到独立时间戳目录（与 `data/logs/run-*.log` 同一时间戳，可互相对上）；`data/exports/latest/` 软链永远指向最新一次——**日常看 `data/exports/latest/report_input.md`，或 `./run.sh report` 生成可视化 `index.html`（账号情报卡 + 选题流两视图，离线 file:// 直接开）**。
+每次运行导出到独立时间戳目录（与 `data/logs/run-*.log` 同一时间戳，可互相对上）；`data/exports/latest/` 软链永远指向最新一次——**日常看 `data/exports/latest/report_input.md`，或 `./run.sh web` 生成可视化 `index.html`（账号情报卡 + 内容流两视图，离线 file:// 直接开）；要交给下游程序/LLM 则 `./run.sh bundle` 打成研究快照 zip**。
 
 | 文件 | 内容 | 给谁 |
 |---|---|---|
 | `report_input.md` | 账号排名 + 典型笔记链接 + 高赞评论织入 | **人读 / 喂 LLM 做竞品分析的主入口** |
-| `topic_feed.md` + `topic_feed.jsonl` | 仅时间窗内的 watchlist 账号最新笔记，头部带出窗/缺时间计数对账 | **人读 / 下游选题项目的主入口** |
 | `account_profile.csv` | watchlist 账号专业度分项：垂直度（内容命中领域关键词占比）/ 窗内发帖数 / 综合分，可复算 | 机器 |
 | `creator_profiles.csv` | watchlist 账号官方主页档案：**verify_type（0未认证/1个人/2机构认证）** / red_id（小红书号）/ 粉丝 / 简介 / IP——机构判定 `verify_type==2` 机械可判 | 机器 |
 | `watchlist.csv` | 关注账号清单（manual/auto 来源标注） | 机器 |
@@ -86,7 +85,7 @@ curl -s http://127.0.0.1:9222/json/version   # 有 JSON 返回 = 端口就绪
 | `typical_notes.csv` | 每账号代表作及入选理由 | 机器 |
 | `comments.csv` | 典型笔记一级评论，表头固定 `body,note_id,like_count,collected_at` | 机器 |
 
-一切新能力 opt-in：不配 `watchlist` 段 → 不产 watchlist/creator/profile/topic_feed 六件，行为与 v0 一致；`comments.enabled: false` 时不产 `comments.csv`。管线口径**诚实不假装**：某步采集失败 → 记入 error、该部分为空、其余照出（creator 部分账号失败时保留成功账号的笔记并在日志警告）。
+一切新能力 opt-in：不配 `watchlist` 段 → 不产 watchlist/creator_notes/account_profile/creator_profiles 四件，行为与 v0 一致；`comments.enabled: false` 时不产 `comments.csv`。管线口径**诚实不假装**：某步采集失败 → 记入 error、该部分为空、其余照出（creator 部分账号失败时保留成功账号的笔记并在日志警告）。
 
 ## 数据目录
 
