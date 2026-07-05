@@ -49,7 +49,11 @@ def build_watchlist(
         )
 
     cap = max(0, max_total)
-    dropped = accounts[cap:]
+    # 本方账号（self）绝不截尾：先全额保留，max_total 只约束 manual/auto 的其余名额
+    self_accts = [a for a in accounts if a.source == "self"]
+    others = [a for a in accounts if a.source != "self"]
+    keep_others = max(0, cap - len(self_accts))
+    dropped = others[keep_others:]
     if dropped:
         # 静默砍尾会无声丢账号（含 manual 手写项）——超限必须留痕
         logger.warning(
@@ -58,4 +62,8 @@ def build_watchlist(
             len(dropped),
             ",".join(a.account_id for a in dropped),
         )
-    return accounts[:cap]
+    if len(self_accts) > cap:
+        logger.warning(
+            "本方账号数 %d 超 max_total=%d——self 不截尾，已全部保留", len(self_accts), cap
+        )
+    return self_accts + others[:keep_others]

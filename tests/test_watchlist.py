@@ -119,6 +119,22 @@ def test_build_watchlist_self_survives_truncation():
     assert watchlist[0].source == "self"
 
 
+def test_build_watchlist_self_never_dropped_even_beyond_max_total():
+    # self 账号数超过 max_total 时也全额保留（承诺：本方账号绝不截尾）
+    watchlist = build_watchlist(
+        [],
+        manual_ids=["000000000000000000000097", "000000000000000000000098"],
+        auto_top_n=0,
+        max_total=1,
+        self_ids={"000000000000000000000097", "000000000000000000000098"},
+    )
+    assert {w.account_id for w in watchlist} == {
+        "000000000000000000000097",
+        "000000000000000000000098",
+    }
+    assert all(w.source == "self" for w in watchlist)
+
+
 def test_build_watchlist_does_not_fill_beyond_auto_window():
     ranked = [
         _rank("000000000000000000000001", "Rank One", 30),
