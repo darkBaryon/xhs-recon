@@ -27,7 +27,14 @@
   };
   const fmtDate = (iso) => (iso || "").replace(/^\d{4}-/, "").replace("-", "/");
   const VF = { 2: ["机构认证", "b-org"], 1: ["个人认证", "b-person"], 0: ["未认证", "b-none"] };
-  const srcLabel = (s) => (s === "manual" ? "手动关注" : s === "auto" ? "榜单自动" : "搜索发现");
+  const srcLabel = (s) =>
+    s === "self"
+      ? "本方账号"
+      : s === "manual"
+        ? "手动关注"
+        : s === "auto"
+          ? "榜单自动"
+          : "搜索发现";
 
   function engEl(p) {
     const e = el("span", "eng");

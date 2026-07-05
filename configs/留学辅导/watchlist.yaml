@@ -5,6 +5,10 @@
 #   考而思可在 App 内直接搜小红书号 9721220341（官网自挂；数字号≠主页 id，仍需进主页复制链接）
 #   站外搜索引擎挖不到主页 id（站内页不被收录，官网不给直链）——已验证，别再试
 manual:
+  # 本方账号（self: true → 导出 source=self，非竞品，绝不被 max_total 截掉）
+  - account_id: 68b0f232000000001901a217
+    nickname: 本方账号
+    self: true
   - account_id: 638ea9d7000000001f01d7f7
     nickname: 路觅留学生课程辅导
   - account_id: 63a95006000000002801986e

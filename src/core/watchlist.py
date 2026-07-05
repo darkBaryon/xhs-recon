@@ -16,13 +16,19 @@ def build_watchlist(
     auto_top_n: int,
     max_total: int,
     manual_nicknames: dict[str, str] | None = None,
+    self_ids: set[str] | None = None,
 ) -> list[WatchAccount]:
     nickname_by_id = {r.account_id: r.nickname for r in ranked}
     manual_nicknames = manual_nicknames or {}
+    self_ids = self_ids or set()
     accounts: list[WatchAccount] = []
     seen: set[str] = set()
 
-    for account_id in manual_ids:
+    # 本方账号（source="self"）排最前：绝不被 max_total 截尾丢掉；其余 manual 保持原序
+    ordered_manual = [aid for aid in manual_ids if aid in self_ids] + [
+        aid for aid in manual_ids if aid not in self_ids
+    ]
+    for account_id in ordered_manual:
         if account_id in seen:
             continue
         seen.add(account_id)
@@ -30,7 +36,7 @@ def build_watchlist(
             WatchAccount(
                 account_id=account_id,
                 nickname=manual_nicknames.get(account_id) or nickname_by_id.get(account_id, ""),
-                source="manual",
+                source="self" if account_id in self_ids else "manual",
             )
         )
 

@@ -60,6 +60,9 @@ def _research(config, collected_at: str) -> dict:
         if wl is None
         else {
             "manual_count": len(wl.manual),
+            "self_count": sum(
+                1 for e in wl.manual if isinstance(e, dict) and (e.get("self") or e.get("owner"))
+            ),
             "auto_top_n": wl.auto_top_n,
             "max_total": wl.max_total,
         },

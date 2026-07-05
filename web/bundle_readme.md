@@ -17,8 +17,8 @@
   `0`=未认证 · `-1`=档案未含该字段（个人号常见）。判机构号看 `verify_type==2`。
 - **`in_window`**（笔记是否在时间窗内）：`true`=发布时间在近 `window_days` 天内 ·
   `false`=出窗 · `null`=缺发布时间。窗口大小见 `research.json.window_days`。
-- **`source`**（账号来源）：`manual`=手动关注 · `auto`=搜索榜单自动入选 ·
-  `rank`=纯搜索榜单（无 watchlist 时）。
+- **`source`**（账号来源）：`self`=**本方账号（我们自己的号，非竞品，分析时应单独对待）** ·
+  `manual`=手动关注 · `auto`=搜索榜单自动入选 · `rank`=纯搜索榜单（无 watchlist 时）。
 - **打分**：`account_score`=搜索侧加权（笔记数×关键词命中×互动）；
   `profile_score`=垂直度×10 + 窗内发帖数；均可能为 `null`（该侧未采）。
 - **`side`**：`creator`=从账号主页拉的最新笔记 · `search`=关键词搜索命中的笔记。

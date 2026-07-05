@@ -95,15 +95,20 @@ def _backfill_watchlist_nicknames(
     ]
 
 
-def _manual_watch_account(entry) -> tuple[str, str]:
+def _manual_watch_account(entry) -> tuple[str, str, bool]:
+    """归一化一条 manual 条目 →（account_id, nickname, is_self）。
+
+    dict 条目可带 `self: true` 标记为「本方账号」，导出时 source 记为 self。
+    """
     if isinstance(entry, str):
-        return normalize_creator_ref(entry), ""
+        return normalize_creator_ref(entry), "", False
     if isinstance(entry, dict):
         ref = entry.get("account_id") or entry.get("id") or entry.get("url") or entry.get("ref")
         if not ref:
             raise ValueError(f"watchlist.manual 条目缺少 account_id/id/url/ref：{entry}")
         nickname = str(entry.get("nickname") or entry.get("name") or "").strip()
-        return normalize_creator_ref(str(ref)), nickname
+        is_self = bool(entry.get("self") or entry.get("owner"))
+        return normalize_creator_ref(str(ref)), nickname, is_self
     raise ValueError(f"invalid creator ref: {entry}")
 
 
@@ -186,20 +191,28 @@ def _sync_stage(
     except ValueError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1) from e
-    manual_ids = [account_id for account_id, _ in manual_accounts]
+    manual_ids = [account_id for account_id, _, _ in manual_accounts]
     manual_nicknames = {
-        account_id: nickname for account_id, nickname in manual_accounts if nickname
+        account_id: nickname for account_id, nickname, _ in manual_accounts if nickname
     }
+    self_ids = {account_id for account_id, _, is_self in manual_accounts if is_self}
 
     auto_top_n = watchlist_cfg.auto_top_n
     max_total = watchlist_cfg.max_total
     watchlist = build_watchlist(
-        ranks, manual_ids, auto_top_n, max_total, manual_nicknames=manual_nicknames
+        ranks,
+        manual_ids,
+        auto_top_n,
+        max_total,
+        manual_nicknames=manual_nicknames,
+        self_ids=self_ids,
     )
     auto_count = sum(1 for account in watchlist if account.source == "auto")
+    self_count = sum(1 for account in watchlist if account.source == "self")
     logger.info(
-        "watchlist：manual %d · auto %d/%d · total %d",
-        len(manual_ids),
+        "watchlist：self %d · manual %d · auto %d/%d · total %d",
+        self_count,
+        len(manual_ids) - self_count,
         auto_count,
         auto_top_n,
         len(watchlist),

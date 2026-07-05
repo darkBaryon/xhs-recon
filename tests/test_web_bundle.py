@@ -76,7 +76,12 @@ def test_build_bundle_zip(tmp_path):
         assert research["seed_keywords"] == ["留学生辅导", "论文辅导"]
         assert "课业辅导" in research["expanded_keywords"]
         assert research["window_days"] == 30
-        assert research["watchlist"] == {"manual_count": 2, "auto_top_n": 2, "max_total": 10}
+        assert research["watchlist"] == {
+            "manual_count": 2,
+            "self_count": 0,
+            "auto_top_n": 2,
+            "max_total": 10,
+        }
 
         accounts = json.loads(z.read(f"{stem}/accounts.json"))
         u1 = next(a for a in accounts if a["account_id"] == "U1")
