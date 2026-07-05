@@ -219,6 +219,33 @@ def test_fetch_comments_builds_detail_command_and_reads_jsonl(tmp_path, monkeypa
     assert cmd[cmd.index("--save_data_path") + 1].endswith("2026-06-24T00-00-00Z-comments")
 
 
+def test_fetch_comments_timeout_scales_with_note_count(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)  # 默认 timeout=600
+    captured = {}
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        captured["timeout"] = timeout
+        return 0, ""
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    notes = [_typical(f"n{i}", f"https://xhs.example/n{i}?xsec_token=t{i}") for i in range(10)]
+    a.fetch_comments(notes, 10, "2026-06-24T00:00:00Z")
+    assert captured["timeout"] == 120 * 10  # _COMMENT_PER_NOTE_SEC × 篇数，> 下限 600
+
+
+def test_session_timeout_zero_config_means_unbounded(tmp_path, monkeypatch):
+    a = _adapter(tmp_path, timeout=0)  # 0 = 去掉超时限制
+    captured = {}
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        captured["timeout"] = timeout
+        return 0, ""
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    a.fetch_comments([_typical("n1", "https://xhs.example/n1?xsec_token=a")], 10, "2026")
+    assert captured["timeout"] == 0  # 会话预算 0 → _run_crawler 内转无限等
+
+
 def test_fetch_comments_empty_urls_short_circuits(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
 
@@ -235,7 +262,7 @@ def test_fetch_comments_empty_urls_short_circuits(tmp_path, monkeypatch):
 
 def test_fetch_comments_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, monkeypatch, caplog):
     a = _adapter(tmp_path)
-    monkeypatch.setattr(a, "_run_crawler", lambda cmd: (1, "boom"))
+    monkeypatch.setattr(a, "_run_crawler", lambda cmd, timeout=None: (1, "boom"))
 
     with caplog.at_level(logging.WARNING):
         r = a.fetch_comments([_typical("n1", "https://xhs.example/n1")], 10, "2026")

@@ -62,6 +62,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
     _CREATOR_PER_ACCOUNT_SEC = 120
     # 单会话 search 超时按关键词×页缩放；每页 20 条，MC 默认每条详情后 sleep 2s
     _SEARCH_PER_KEYWORD_PAGE_SEC = 120
+    # 单会话 comments 超时按笔记数缩放的每笔记预算（秒）：扁平 600s 对 30 篇不够（实测超时）
+    _COMMENT_PER_NOTE_SEC = 120
 
     def __init__(
         self,
@@ -199,6 +201,10 @@ class MediaCrawlerAdapter(ResearchAdapter):
         ]
         return self._append_cookies(cmd)
 
+    def _session_budget(self, scaled: int) -> int:
+        """单会话超时预算：config timeout<=0 → 0（无限制）；否则 max(下限, 按工作量放大)。"""
+        return 0 if self.timeout <= 0 else max(self.timeout, scaled)
+
     def _run_crawler(
         self,
         cmd: list[str],
@@ -211,7 +217,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         返回值语义与旧版 subprocess.run 一致：(rc, 完整输出)。超时同样抛
         TimeoutExpired 且 e.output 带已读到的部分（抢救已落盘账号的口径不变）。
         """
-        budget = timeout or self.timeout
+        budget = self.timeout if timeout is None else timeout
+        wait_arg = budget if budget and budget > 0 else None  # <=0 → 不设超时，无限等
         lines: list[str] = []
         with subprocess.Popen(
             cmd,
@@ -237,7 +244,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             reader = threading.Thread(target=_pump, daemon=True)
             reader.start()
             try:
-                rc = p.wait(timeout=budget)
+                rc = p.wait(timeout=wait_arg)
             except subprocess.TimeoutExpired:
                 p.kill()
                 p.wait()
@@ -414,9 +421,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
 
         save_path = self._search_session_save_path(collected_at)
         cmd = self._build_search_command(keywords, 1, pages, limit, save_path)
-        session_timeout = max(
-            self.timeout,
-            self._SEARCH_PER_KEYWORD_PAGE_SEC * len(keywords) * max(pages, 1),
+        session_timeout = self._session_budget(
+            self._SEARCH_PER_KEYWORD_PAGE_SEC * len(keywords) * max(pages, 1)
         )
         detail_stats: dict[str, dict[str, int]] = {}
         on_line = self._search_progress_parser(detail_stats)
@@ -505,8 +511,10 @@ class MediaCrawlerAdapter(ResearchAdapter):
 
         save_path = self._save_path(collected_at + "-comments")
         cmd = self._build_comments_command(urls, limit, save_path)
+        # 超时按笔记数缩放：一个会话顺序读 N 篇的评论，扁平 600s 对 30 篇不够（实测超时）
+        session_timeout = self._session_budget(self._COMMENT_PER_NOTE_SEC * len(urls))
         try:
-            rc, out = self._run_crawler(cmd)
+            rc, out = self._run_crawler(cmd, timeout=session_timeout)
         except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
             return self._err(
                 None,
@@ -584,7 +592,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         save_path = self._save_path(collected_at) / "creator"
         cmd = self._build_creator_command(account_ids, limit, save_path)
         # 超时按账号数缩放：一个会话拉 N 账号，固定 600s 对大 watchlist 不够
-        session_timeout = max(self.timeout, self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
+        session_timeout = self._session_budget(self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
         t0 = perf_counter()
 
         on_line = self._creator_progress_parser() if self.on_progress else None

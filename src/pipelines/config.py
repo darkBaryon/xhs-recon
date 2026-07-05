@@ -52,6 +52,7 @@ class MediaCrawlerCfg(BaseModel):
     login_type: str = "qrcode"
     cookies: str = ""
     out_dir: str = "data/raw"
+    # 单会话超时下限（秒）；各阶段按工作量放大。设 0 = 完全不限时（无限等，慎用）
     timeout: int = 600
     max_concurrency: int = 1
     sleep_sec: float = 2.0

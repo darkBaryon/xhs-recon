@@ -5,7 +5,7 @@ mediacrawler:
   login_type: qrcode                       # 或 cookie（配 cookies）
   cookies: ""
   out_dir: data/raw                        # 真实采集 raw 落此（gitignore）
-  timeout: 600                             # 单次子进程上限秒数（搜索每词/creator 每账号各一次）
+  timeout: 0                               # 0=不限时（无限等，慎用）；>0 为各阶段超时下限、按工作量放大
   max_concurrency: 1                       # 保持单页面/单详情并发，降低风控概率
   sleep_sec: 1.0                           # MC 默认 2s；真实采集耗时主要卡在详情 sleep
 keywords_file: configs/留学辅导/keywords.yaml     # 词表资产外置（与 inline keywords/synonyms 互斥）
