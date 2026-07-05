@@ -284,8 +284,8 @@ def _comments_stage(
                 len(typical),
                 max_notes,
             )
-        # 进行时提示：评论段是单个子进程调用，期间无逐条输出，预告避免误判卡死
-        logger.info("评论：开始采集 %d 条典型笔记的评论（单并发批量，约需数分钟）", len(targets))
+        # 进行时提示：单个子进程批量采，adapter 会按篇往日志写「N/总 完成」进度
+        logger.info("评论：开始采集 %d 条典型笔记（单并发批量，逐篇进度见日志）", len(targets))
         try:
             with progress.spinner(f"评论采集：{len(targets)} 条典型笔记…"):
                 comment_result = adapter.fetch_comments(targets, comments_cfg.limit, collected_at)

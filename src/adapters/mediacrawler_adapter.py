@@ -513,8 +513,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
         cmd = self._build_comments_command(urls, limit, save_path)
         # 超时按笔记数缩放：一个会话顺序读 N 篇的评论，扁平 600s 对 30 篇不够（实测超时）
         session_timeout = self._session_budget(self._COMMENT_PER_NOTE_SEC * len(urls))
+        on_line = self._comments_progress_parser(len(urls))
         try:
-            rc, out = self._run_crawler(cmd, timeout=session_timeout)
+            rc, out = self._run_crawler(cmd, timeout=session_timeout, on_line=on_line)
         except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
             return self._err(
                 None,
@@ -581,6 +582,26 @@ class MediaCrawlerAdapter(ResearchAdapter):
             elif _RE_NOTE_DETAIL_DONE.search(line):
                 counts["note"] += 1
                 self._emit({"kind": "note", "count": counts["note"]})
+
+        return handle
+
+    def _comments_progress_parser(self, total: int) -> Callable[[str], None]:
+        """逐行解析评论 detail 会话输出，按篇往日志写进度（非 TTY 下也可见，不依赖进度条）。
+
+        detail 模式每篇完成打 `Finish get note detail`、失败打 `Failed to get note detail`，
+        与 creator 同款信号。这里只做日志（评论段常被 run.sh 管道跑，进度条会被抑制）。
+        """
+        seen = {"n": 0}
+
+        def handle(line: str) -> None:
+            if _RE_NOTE_DETAIL_DONE.search(line):
+                seen["n"] += 1
+                logger.info("评论：笔记 %d/%d 详情完成", seen["n"], total)
+            else:
+                m = _RE_NOTE_DETAIL_FAILED.search(line)
+                if m:
+                    seen["n"] += 1
+                    logger.warning("评论：笔记 %d/%d 详情失败（%s）", seen["n"], total, m.group(1))
 
         return handle
 

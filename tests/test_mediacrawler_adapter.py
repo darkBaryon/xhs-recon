@@ -219,6 +219,27 @@ def test_fetch_comments_builds_detail_command_and_reads_jsonl(tmp_path, monkeypa
     assert cmd[cmd.index("--save_data_path") + 1].endswith("2026-06-24T00-00-00Z-comments")
 
 
+def test_fetch_comments_logs_per_note_progress(tmp_path, monkeypatch, caplog):
+    # detail 会话每篇的 Finish/Failed 行 → 逐篇进度日志（非 TTY 也可见）
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        assert on_line is not None
+        on_line("... Finish get note detail, note_id: n1 ...")
+        on_line("... Failed to get note detail, note_id: n2, ...")
+        on_line("... Finish get note detail, note_id: n3 ...")
+        return 0, ""
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    notes = [_typical(f"n{i}", f"https://xhs.example/n{i}?xsec_token=t{i}") for i in range(3)]
+    with caplog.at_level(logging.INFO):
+        a.fetch_comments(notes, 10, "2026-06-24T00:00:00Z")
+    text = caplog.text
+    assert "笔记 1/3 详情完成" in text
+    assert "笔记 2/3 详情失败" in text
+    assert "笔记 3/3 详情完成" in text
+
+
 def test_fetch_comments_timeout_scales_with_note_count(tmp_path, monkeypatch):
     a = _adapter(tmp_path)  # 默认 timeout=600
     captured = {}
@@ -262,7 +283,7 @@ def test_fetch_comments_empty_urls_short_circuits(tmp_path, monkeypatch):
 
 def test_fetch_comments_nonzero_exit_is_error_and_writes_crawler_log(tmp_path, monkeypatch, caplog):
     a = _adapter(tmp_path)
-    monkeypatch.setattr(a, "_run_crawler", lambda cmd, timeout=None: (1, "boom"))
+    monkeypatch.setattr(a, "_run_crawler", lambda cmd, timeout=None, on_line=None: (1, "boom"))
 
     with caplog.at_level(logging.WARNING):
         r = a.fetch_comments([_typical("n1", "https://xhs.example/n1")], 10, "2026")
