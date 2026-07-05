@@ -1,4 +1,4 @@
-"""cli 子命令：research 与旧入口逐字节等价；search/sync/comments 分工与补全写回口径。"""
+"""cli 子命令：research 与旧入口逐字节等价；search/track/comments 分工与写回口径。"""
 
 from pathlib import Path
 
@@ -99,13 +99,13 @@ def test_cli_search_produces_only_search_side(tmp_path):
     assert (out / "latest").is_symlink()  # search 建目录并维护 latest
 
 
-def test_cli_sync_backfills_latest_run_dir(tmp_path):
+def test_cli_track_backfills_search_run_dir(tmp_path):
     out = tmp_path / "out"
     cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
     assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
     before = _snapshot(_run_dir(out))
 
-    result = runner.invoke(app, ["sync", "--config", cfg_path])
+    result = runner.invoke(app, ["track", "--config", cfg_path])
     assert result.exit_code == 0
     after = _snapshot(_run_dir(out))
 
@@ -119,24 +119,66 @@ def test_cli_sync_backfills_latest_run_dir(tmp_path):
     }
     # 旧文件字节不变（评审 #1 阻塞1 的回归锁）
     for name in before:
-        assert after[name] == before[name], f"{name} 被 sync 改动"
+        assert after[name] == before[name], f"{name} 被 track 改动"
     # manual 账号进了 watchlist
     assert b"601d0481000000000101cc46" in after["watchlist.csv"]
 
 
-def test_cli_sync_without_any_run_exits(tmp_path):
-    cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(tmp_path / "out"))
-    result = runner.invoke(app, ["sync", "--config", cfg_path])
-    assert result.exit_code == 1
+def test_cli_track_standalone_self_builds_run_dir(tmp_path):
+    # 无任何 search：track 自建运行目录独立跑（解耦「必须先 search」）
+    out = tmp_path / "out"
+    cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
+    result = runner.invoke(app, ["track", "--config", cfg_path])
+    assert result.exit_code == 0, result.output
+    run_dir = _run_dir(out)
+    names = set(_snapshot(run_dir))
+    # 只产 watchlist 侧、无 search 产物
+    assert "watchlist.csv" in names
+    assert names.isdisjoint({"accounts.csv", "notes.csv", "account_rank.csv"})
+    # manual 账号在；无榜单 → auto 名额降级
+    watch = (run_dir / "watchlist.csv").read_text(encoding="utf-8")
+    assert "601d0481000000000101cc46" in watch
+    assert "auto" not in watch
 
 
-def test_cli_sync_missing_rank_degrades_to_manual_only(tmp_path):
+def test_cli_track_rerun_archives_new_run_dir(tmp_path, monkeypatch):
+    # 已 track 过的 latest 再跑 track → 自建新目录逐次归档，旧目录不动（日常盯人工作流）
+    import itertools
+
+    counter = itertools.count(1)
+    monkeypatch.setattr(
+        "src.pipelines.runtime.now_iso", lambda: f"2026-01-{next(counter):02d}T00:00:00"
+    )
+    out = tmp_path / "out"
+    cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
+    assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
+    assert runner.invoke(app, ["track", "--config", cfg_path]).exit_code == 0
+    first_dir = _run_dir(out)
+    assert (first_dir / "watchlist.csv").exists()  # 已 track（补全写回 search 目录）
+
+    assert runner.invoke(app, ["track", "--config", cfg_path]).exit_code == 0
+    second_dir = _run_dir(out)
+    assert second_dir != first_dir  # 归档到新目录
+    assert (second_dir / "watchlist.csv").exists()
+    assert first_dir.exists()  # 旧目录保留
+    assert not (second_dir / "notes.csv").exists()  # 新目录纯 watchlist 侧
+
+    # 第三次 track：latest 已是无榜单的自建目录，auto 名额须回溯最近 search，不得静默清空
+    assert runner.invoke(app, ["track", "--config", cfg_path]).exit_code == 0
+    third_dir = _run_dir(out)
+    assert third_dir not in (first_dir, second_dir)
+    watch = (third_dir / "watchlist.csv").read_text(encoding="utf-8")
+    assert "auto" in watch  # 榜单回溯成功，auto 名额仍在
+    assert "601d0481000000000101cc46" in watch  # manual 也在
+
+
+def test_cli_track_missing_rank_degrades_to_manual_only(tmp_path):
     out = tmp_path / "out"
     cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
     assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
     (_run_dir(out) / "account_rank.csv").unlink()
 
-    result = runner.invoke(app, ["sync", "--config", cfg_path])
+    result = runner.invoke(app, ["track", "--config", cfg_path])
     assert result.exit_code == 0
     watch = (_run_dir(out) / "watchlist.csv").read_text(encoding="utf-8")
     assert "auto" not in watch  # 榜单缺失 → 无 auto 名额
@@ -147,7 +189,7 @@ def test_cli_comments_backfills_report_and_keeps_others(tmp_path):
     out = tmp_path / "out"
     cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
     assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
-    assert runner.invoke(app, ["sync", "--config", cfg_path]).exit_code == 0
+    assert runner.invoke(app, ["track", "--config", cfg_path]).exit_code == 0
     before = _snapshot(_run_dir(out))
 
     result = runner.invoke(app, ["comments", "--config", cfg_path])
@@ -178,11 +220,11 @@ def test_cli_comments_respects_enabled_flag(tmp_path):
     assert "comments.csv" not in names  # 开关拦下，未采集
 
 
-def test_full_chain_search_sync_comments(tmp_path):
+def test_full_chain_search_track_comments(tmp_path):
     """推荐链路端到端：三命令顺序执行全通，产物聚在同一运行目录。"""
     out = tmp_path / "out"
     cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
-    for cmd in ["search", "sync", "comments"]:
+    for cmd in ["search", "track", "comments"]:
         assert runner.invoke(app, [cmd, "--config", cfg_path]).exit_code == 0, cmd
     names = set(_snapshot(_run_dir(out)))
     assert {
@@ -242,7 +284,7 @@ def test_comments_stage_caps_typical_notes(monkeypatch):
     assert adapter.seen == [3]  # 只送前 3 条（按 note_score 降序）
 
 
-def test_cli_sync_produces_creator_profiles(tmp_path):
+def test_cli_track_produces_creator_profiles(tmp_path):
     """档案落盘 e2e：sync 后同目录多出 creator_profiles.csv，旧文件字节不变。"""
     out = tmp_path / "out"
     cfg = _cfg(out)
@@ -251,7 +293,7 @@ def test_cli_sync_produces_creator_profiles(tmp_path):
     assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
     before = _snapshot(_run_dir(out))
 
-    assert runner.invoke(app, ["sync", "--config", cfg_path]).exit_code == 0
+    assert runner.invoke(app, ["track", "--config", cfg_path]).exit_code == 0
     after = _snapshot(_run_dir(out))
 
     assert "creator_profiles.csv" in set(after) - set(before)

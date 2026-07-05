@@ -2,13 +2,13 @@
 # xhs-recon 启动脚本
 #   ./run.sh            # 离线 fixture demo（无需登录/浏览器）
 #   ./run.sh search     # 真实·广角：关键词搜索+榜单（每周）
-#   ./run.sh sync       # 真实·长焦：watchlist→creator→topic_feed（每周）
+#   ./run.sh track      # 真实·长焦：watchlist→creator 主页/档案（每周，可独立跑）
 #   ./run.sh comments   # 真实·深读：补采评论（做深度分析时）
 #   ./run.sh real       # 真实·全流程（= research）
 #   ./run.sh browser    # 只启动/检查采集浏览器（专用 profile + CDP 9222）
 #   ./run.sh web        # 把最新一跑渲染成本地静态站并打开（离线，无需采集）
 #   ./run.sh bundle     # 把最新一跑打包成研究快照 zip（供下游程序/LLM）
-# 主题配置默认 configs/留学辅导/run.yaml，换赛道：CONFIG=configs/<主题>/run.yaml ./run.sh sync
+# 主题配置默认 configs/留学辅导/run.yaml，换赛道：CONFIG=configs/<主题>/run.yaml ./run.sh track
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -82,7 +82,7 @@ case "$cmd" in
   demo)
     exec uv run python -m src.pipelines.run_research --config configs/sample.yaml "$@"
     ;;
-  search|sync|comments)
+  search|track|comments)
     ensure_browser
     acquire_run_lock
     uv run python -m src.pipelines.cli "$cmd" --config "$CONFIG" "$@"
@@ -107,7 +107,7 @@ case "$cmd" in
     exec uv run python -m src.pipelines.cli bundle --config "$CONFIG" "$@"
     ;;
   *)
-    echo "用法: ./run.sh [demo|search|sync|comments|real|browser|web|bundle]" >&2
+    echo "用法: ./run.sh [demo|search|track|comments|real|browser|web|bundle]" >&2
     exit 2
     ;;
 esac
