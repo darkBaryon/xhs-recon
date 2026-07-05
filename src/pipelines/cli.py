@@ -104,9 +104,6 @@ def sync(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
         watchlist=artifacts.watchlist,
         creator_notes=artifacts.creator_notes,
         account_profiles=artifacts.account_profiles,
-        topic_feed=artifacts.topic_feed,
-        topic_feed_stats=artifacts.topic_feed_stats,
-        topic_feed_window_days=cfg.search.window_days,
         creator_profiles=artifacts.creator_profiles,
     )
     logger.info("✓ 补全写回 %d 个文件 → %s", len(paths), run_dir)

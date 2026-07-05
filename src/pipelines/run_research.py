@@ -19,7 +19,7 @@ from src.core.exporter import export_all
 from src.core.keyword_expander import expand_keywords
 from src.core.note_selector import select_typical_notes
 from src.core.ports import ResearchAdapter
-from src.core.time_window import WindowFilterStats, filter_notes
+from src.core.time_window import filter_notes
 from src.core.watchlist import build_watchlist
 from src.models import (
     Account,
@@ -113,8 +113,6 @@ class SyncArtifacts(BaseModel):
     watchlist: list[WatchAccount] | None = None
     creator_notes: list[Note] | None = None
     account_profiles: list[AccountRank] | None = None
-    topic_feed: list[Note] | None = None
-    topic_feed_stats: WindowFilterStats | None = None
     creator_profiles: list[CreatorProfile] | None = None
 
 
@@ -178,7 +176,7 @@ def _search_stage(
 def _sync_stage(
     config: RunConfig, adapter: ResearchAdapter, collected_at: str, ranks: list[AccountRank]
 ) -> SyncArtifacts:
-    """watchlist 同步段：合成 → creator 拉取 → 专业度分项 → topic_feed 窗过滤。"""
+    """watchlist 同步段：合成 → creator 拉取 → 专业度分项。"""
     watchlist_cfg = config.watchlist
     if watchlist_cfg is None:
         return SyncArtifacts()
@@ -248,19 +246,10 @@ def _sync_stage(
         collected_at,
         config.ranking.weights,
     )
-    topic_feed_notes, topic_feed_stats = filter_notes(creator_notes, window_days, collected_at)
-    logger.info(
-        "topic_feed：kept=%d out_of_window=%d missing_time=%d",
-        topic_feed_stats.kept,
-        topic_feed_stats.out_of_window,
-        topic_feed_stats.missing_time,
-    )
     return SyncArtifacts(
         watchlist=watchlist,
         creator_notes=creator_notes,
         account_profiles=account_profiles,
-        topic_feed=topic_feed_notes,
-        topic_feed_stats=topic_feed_stats,
         creator_profiles=creator_profiles,
     )
 
@@ -332,9 +321,6 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
         watchlist=sync.watchlist,
         creator_notes=sync.creator_notes,
         account_profiles=sync.account_profiles,
-        topic_feed=sync.topic_feed,
-        topic_feed_stats=sync.topic_feed_stats,
-        topic_feed_window_days=config.search.window_days,
         creator_profiles=sync.creator_profiles,
     )
     runtime.update_latest_link(out_base, run_dir)

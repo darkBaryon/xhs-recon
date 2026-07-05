@@ -94,8 +94,6 @@ def test_cli_search_produces_only_search_side(tmp_path):
             "watchlist.csv",
             "creator_notes.csv",
             "account_profile.csv",
-            "topic_feed.md",
-            "topic_feed.jsonl",
         }
     )
     assert (out / "latest").is_symlink()  # search 建目录并维护 latest
@@ -117,8 +115,6 @@ def test_cli_sync_backfills_latest_run_dir(tmp_path):
         "watchlist.csv",
         "creator_notes.csv",
         "account_profile.csv",
-        "topic_feed.md",
-        "topic_feed.jsonl",
         "creator_profiles.csv",
     }
     # 旧文件字节不变（评审 #1 阻塞1 的回归锁）
@@ -198,8 +194,6 @@ def test_full_chain_search_sync_comments(tmp_path):
         "watchlist.csv",
         "creator_notes.csv",
         "account_profile.csv",
-        "topic_feed.md",
-        "topic_feed.jsonl",
         "comments.csv",
     } <= names
 

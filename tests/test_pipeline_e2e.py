@@ -1,7 +1,5 @@
 import csv
-import json
 import re
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -163,8 +161,6 @@ def test_pipeline_watchlist_fixture_exports_creator_files_and_keeps_old_outputs(
         "watchlist",
         "creator_notes",
         "account_profile",
-        "topic_feed",
-        "topic_feed_jsonl",
         "creator_profiles",
     }
     for key in ["accounts", "notes", "account_rank", "typical_notes", "report_input"]:
@@ -287,9 +283,9 @@ def test_pipeline_window_filters_before_aggregate(tmp_path, monkeypatch, capsys)
     assert [row["account_id"] for row in account_rows] == ["66dd617b000000001d0215a6"]
 
 
-def test_pipeline_topic_feed_keeps_only_window_notes_and_counts_stats(
-    tmp_path, monkeypatch, caplog
-):
+def test_pipeline_account_profile_recent_count_is_window_filtered(tmp_path, monkeypatch):
+    # 窗口逻辑仍在（喂 account_profile 的 recent_note_count）——topic_feed 文件已移除，
+    # 但「窗内发帖数」这个专业度分项照旧按 window_days 过滤。
     now_iso = "2026-07-03T00:00:00+00:00"
     monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: now_iso)
     cfg = _cfg(tmp_path)
@@ -307,33 +303,10 @@ def test_pipeline_topic_feed_keeps_only_window_notes_and_counts_stats(
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
 
-    with caplog.at_level("INFO"):
-        paths = run_research(str(cfg_path))
+    paths = run_research(str(cfg_path))
 
-    creator_rows = _csv_rows(Path(paths["creator_notes"]))
-    json_rows = [
-        json.loads(line)
-        for line in Path(paths["topic_feed_jsonl"]).read_text(encoding="utf-8").splitlines()
-    ]
-    assert [row["note_id"] for row in json_rows] == [
-        "6a4661cd0000000017029d86",
-        "6a4661a0000000001702c88e",
-    ]
-
-    now = datetime.fromisoformat(now_iso)
-    for row in json_rows:
-        published_at = datetime.fromisoformat(row["published_at"])
-        age_days = (now - published_at).total_seconds() / 86400
-        assert 0 <= age_days <= 30
-
-    feed_head = Path(paths["topic_feed"]).read_text(encoding="utf-8").splitlines()[0]
-    assert feed_head == "窗口 30 天 · 入 feed 2 条 · 出窗 1 · 缺时间 0 · 账号 1"
-    counts = {
-        key: int(value) for key, value in re.findall(r"(入 feed|出窗|缺时间) (\d+)", feed_head)
-    }
-    assert counts == {"入 feed": 2, "出窗": 1, "缺时间": 0}
-    assert counts["入 feed"] + counts["出窗"] + counts["缺时间"] == len(creator_rows)
-    assert "topic_feed：kept=2 out_of_window=1 missing_time=0" in caplog.text
+    # topic_feed 文件已移除
+    assert "topic_feed" not in paths and "topic_feed_jsonl" not in paths
 
     profile_rows = _csv_rows(Path(paths["account_profile"]))
     assert profile_rows == [

@@ -128,7 +128,7 @@
     }
 
     const ps = el("div", "posts");
-    ps.append(el("div", "posts-h", (DATA.window_feed ? "窗内笔记 · " : "搜索命中 · ") + a.notes.length + " 篇（按互动排序）"));
+    ps.append(el("div", "posts-h", (DATA.creator_side ? "主页笔记 · " : "搜索命中 · ") + a.notes.length + " 篇（按互动排序）"));
     if (!a.notes.length) {
       ps.append(el("div", "empty", "无笔记"));
     } else {
@@ -205,7 +205,7 @@
   function init() {
     const s = DATA.summary;
     $("#title").append(DATA.tracked ? "关注账号情报" : "搜索账号榜单");
-    $("#title").append(el("span", "sub", DATA.window_feed ? " creator 主页 · 窗内发帖" : " 搜索命中 · 全量笔记"));
+    $("#title").append(el("span", "sub", DATA.creator_side ? " creator 主页发帖" : " 搜索命中 · 全量笔记"));
 
     let when = "—";
     if (DATA.collected_at) {
@@ -221,11 +221,11 @@
       x.append(l + " ", el("b", "", v));
       return x;
     };
-    rm.append(seg("采集", when), seg("时间窗", DATA.window_feed ? "近 30 天" : "全量"), seg("快照目录", DATA.run_dir));
+    rm.append(seg("采集", when), seg("数据源", DATA.creator_side ? "creator 主页" : "搜索命中"), seg("快照目录", DATA.run_dir));
 
     const tiles = [
       [s.accounts, DATA.tracked ? "关注账号" : "搜索账号", ""],
-      [s.notes, DATA.window_feed ? "窗内笔记" : "搜索笔记", ""],
+      [s.notes, DATA.creator_side ? "主页笔记" : "搜索笔记", ""],
       [s.profiles, "主页档案", "／ " + s.accounts + " 账号"],
       [s.verified, "机构认证", "verify_type=2", true],
     ];

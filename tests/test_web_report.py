@@ -14,16 +14,6 @@ def _csv(path: Path, header: list[str], rows: list[list]):
         w.writerows(rows)
 
 
-def _tf_line(**kw) -> str:
-    base = {
-        "account_id": "", "nickname": "", "source": "", "note_id": "", "title": "",
-        "body": "", "tags": [], "url": "", "published_at": "", "collected_at": "",
-        "like_count": 0, "collect_count": 0, "comment_count": 0,
-    }
-    base.update(kw)
-    return json.dumps(base, ensure_ascii=False)
-
-
 def _full_run_dir(d: Path):
     _csv(d / "watchlist.csv", ["account_id", "nickname", "source"],
          [["U1", "机构甲", "manual"], ["U2", "老师乙", "manual"]])
@@ -38,16 +28,14 @@ def _full_run_dir(d: Path):
          ["account_id", "nickname", "relevant_note_count", "keyword_hit_count",
           "avg_interaction", "account_score", "note_ids"],
          [["U1", "机构甲", "5", "2", "3000.0", "80.0", "N1|N2"]])
-    (d / "topic_feed.jsonl").write_text(
-        "\n".join([
-            _tf_line(account_id="U1", nickname="机构甲", note_id="N1", title="低赞帖",
-                     url="http://x/N1", published_at="2026-07-01T00:00:00+00:00",
-                     collected_at="2026-07-05T19:30:00+00:00", like_count=10, tags=["留学"]),
-            _tf_line(account_id="U1", nickname="机构甲", note_id="N2", title="高赞帖",
-                     url="http://x/N2", published_at="2026-07-03T00:00:00+00:00",
-                     collected_at="2026-07-05T19:30:00+00:00", like_count=500,
-                     collect_count=100, tags=["dissertation"]),
-        ]) + "\n", encoding="utf-8")
+    _csv(d / "creator_notes.csv",
+         ["note_id", "account_id", "title", "body", "tags", "url", "like_count",
+          "collect_count", "comment_count", "published_at", "collected_at",
+          "source_keywords", "raw_path"],
+         [["N1", "U1", "低赞帖", "", "留学", "http://x/N1", "10", "0", "0",
+           "2026-07-01T00:00:00+00:00", "2026-07-05T19:30:00+00:00", "", "p"],
+          ["N2", "U1", "高赞帖", "", "dissertation", "http://x/N2", "500", "100", "0",
+           "2026-07-03T00:00:00+00:00", "2026-07-05T19:30:00+00:00", "", "p"]])
 
 
 def test_assemble_full_snapshot(tmp_path):
@@ -55,7 +43,7 @@ def test_assemble_full_snapshot(tmp_path):
     data = assemble(tmp_path)
 
     assert data["tracked"] is True
-    assert data["window_feed"] is True
+    assert data["creator_side"] is True
     assert data["summary"] == {"accounts": 2, "notes": 2, "profiles": 1, "verified": 1}
     # 按专业度降序：机构甲(15) 在 老师乙(8) 前
     assert [a["nickname"] for a in data["accounts"]] == ["机构甲", "老师乙"]
@@ -85,7 +73,7 @@ def test_assemble_search_only(tmp_path):
 
     data = assemble(tmp_path)
     assert data["tracked"] is False
-    assert data["window_feed"] is False
+    assert data["creator_side"] is False
     assert data["has_profiles"] is False
     # 按 account_score 降序
     assert [a["nickname"] for a in data["accounts"]] == ["账号一", "账号二"]

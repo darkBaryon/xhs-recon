@@ -1,7 +1,7 @@
 """把一次运行目录的导出装成前端数据，落成自包含静态站（离线 file:// 可开）。
 
 只读导出文件、不依赖 core/models，对搜索侧（account_rank/notes）与 sync 侧
-（watchlist/creator_profiles/account_profile/topic_feed）都稳健：缺哪个文件就少哪块，
+（watchlist/creator_profiles/account_profile/creator_notes）都稳健：缺哪个文件就少哪块，
 不报错。
 
 前后端分离：本模块只负责「读导出 → 拼 payload → 写 data.js」，并把 web/ 下手写的
@@ -25,17 +25,6 @@ def _read_csv(path: Path) -> list[dict]:
         return []
     with open(path, encoding="utf-8") as f:
         return list(csv.DictReader(f))
-
-
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            rows.append(json.loads(line))
-    return rows
 
 
 def _int(v) -> int:
@@ -78,16 +67,16 @@ def assemble(run_dir: Path) -> dict:
     prof = {r["account_id"]: r for r in _read_csv(run_dir / "account_profile.csv")}
     cre = {r["account_id"]: r for r in _read_csv(run_dir / "creator_profiles.csv")}
     rankmap = {r["account_id"]: r for r in ranks}
-    tf = _read_jsonl(run_dir / "topic_feed.jsonl")
+    cre_notes = _read_csv(run_dir / "creator_notes.csv")
     notes_csv = _read_csv(run_dir / "notes.csv")
 
-    # 每账号笔记：优先 topic_feed（窗内），否则退回全量 notes.csv
-    from_jsonl = bool(tf)
-    note_source = tf if tf else notes_csv
+    # 每账号笔记：优先 creator 主页笔记（sync 侧），否则退回搜索命中 notes.csv
+    creator_side = bool(cre_notes)
+    note_source = cre_notes if cre_notes else notes_csv
     notes_by_acc: dict[str, list[dict]] = {}
     for row in note_source:
         notes_by_acc.setdefault(row.get("account_id", ""), []).append(
-            _norm_note(row, from_jsonl=from_jsonl)
+            _norm_note(row, from_jsonl=False)
         )
     for ns in notes_by_acc.values():
         ns.sort(key=lambda n: (_eng(n), n["date"]), reverse=True)
@@ -134,11 +123,11 @@ def assemble(run_dir: Path) -> dict:
     accounts.sort(key=lambda a: a[sort_key], reverse=True)
     max_score = max((a["account_score"] for a in accounts), default=0.0) or 1.0
 
-    # 选题流：所有窗内/搜索笔记按互动降序
+    # 内容流：全部笔记按互动降序
     feed = []
     nick_by_acc = {a["account_id"]: a["nickname"] for a in accounts}
     for row in note_source:
-        n = _norm_note(row, from_jsonl=from_jsonl)
+        n = _norm_note(row, from_jsonl=False)
         feed.append(
             {
                 **n,
@@ -148,18 +137,14 @@ def assemble(run_dir: Path) -> dict:
         )
     feed.sort(key=lambda x: (x["eng"], x["date"]), reverse=True)
 
-    collected_at = ""
-    if tf:
-        collected_at = tf[0].get("collected_at", "")
-    elif notes_csv:
-        collected_at = notes_csv[0].get("collected_at", "")
+    collected_at = note_source[0].get("collected_at", "") if note_source else ""
 
     return {
         "run_dir": run_dir.name,
         "collected_at": collected_at,
         "tracked": tracked,
         "has_profiles": has_profiles,
-        "window_feed": from_jsonl,
+        "creator_side": creator_side,
         "max_score": round(max_score, 2),
         "summary": {
             "accounts": len(accounts),
