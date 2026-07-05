@@ -20,6 +20,7 @@ from src.core.note_selector import select_typical_notes
 from src.pipelines import runtime
 from src.pipelines.artifacts import load_ranks_csv, load_typical_csv, resolve_latest_run_dir
 from src.pipelines.config import RunConfig
+from web.bundle import build_bundle
 from web.report import build_report
 
 app = typer.Typer(add_completion=False, help="xhs-recon 子命令入口")
@@ -147,6 +148,16 @@ def web(config: str = _CONFIG_OPT):
     run_dir = _latest_run_dir_or_exit(cfg)
     path = build_report(run_dir)
     typer.echo(f"web: {path}")
+
+
+@app.command()
+def bundle(config: str = _CONFIG_OPT):
+    """把最新一跑打包成研究快照 zip（research/accounts/notes + 自描述 README，供下游程序/LLM）。"""
+    raw = runtime.resolve_config_refs(yaml.safe_load(Path(config).read_text(encoding="utf-8")))
+    cfg = RunConfig.model_validate(raw)
+    run_dir = _latest_run_dir_or_exit(cfg)
+    path = build_bundle(run_dir, cfg)
+    typer.echo(f"bundle: {path}")
 
 
 if __name__ == "__main__":
