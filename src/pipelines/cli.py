@@ -25,7 +25,7 @@ from src.pipelines import runtime
 from src.pipelines.artifacts import load_ranks_csv, resolve_latest_run_dir
 from src.pipelines.config import RunConfig
 from web.bundle import build_bundle
-from web.report import build_report
+from web.feed import build_feed
 
 app = typer.Typer(add_completion=False, help="xhs-recon 子命令入口")
 logger = logging.getLogger(__name__)
@@ -202,10 +202,8 @@ def track(
 
 @app.command()
 def web(config: str = _CONFIG_OPT):
-    """把最新一跑的导出渲染成本地静态站（index.html+style.css+app.js+data.js，file:// 可开）。"""
-    cfg = RunConfig.model_validate(yaml.safe_load(Path(config).read_text(encoding="utf-8")))
-    run_dir = _latest_run_dir_or_exit(cfg)
-    path = build_report(run_dir)
+    """把 MySQL 全库装成小红书风格本地站（data/site/，file:// 可开）。"""
+    path = build_feed(Path("data/site"))
     typer.echo(f"web: {path}")
 
 

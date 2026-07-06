@@ -9,15 +9,29 @@
 数据来自 run_dir 的导出 CSV（web.report 的读取 helper 复用）；研究输入来自 RunConfig。
 """
 
+import csv
 import json
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
 from src.core.keyword_expander import expand_keywords
-from web.report import _int, _read_csv
 
 PIPE = "|"
+
+
+def _read_csv(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _int(v) -> int:
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return 0
 
 
 def _parse_iso(value: str):

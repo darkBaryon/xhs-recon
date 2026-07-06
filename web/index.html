@@ -1,39 +1,40 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>竞品情报快照 · 留学辅导</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小红书 · 本地库</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="wrap">
-    <div class="shell">
-      <header>
-        <p class="eyebrow">竞品情报快照 · 留学辅导</p>
-        <h1 id="title"></h1>
-        <div class="runmeta" id="runmeta"></div>
-        <div class="tiles" id="tiles"></div>
-      </header>
+<header class="topbar">
+  <div class="logo">📕 <b>本地小红书</b></div>
+  <input id="search" class="search" type="search" placeholder="搜索笔记（标题 / 正文 / 标签 / 作者）">
+  <select id="sort" class="sort">
+    <option value="date">最新发布</option>
+    <option value="like">最多点赞</option>
+    <option value="comment">最多评论</option>
+    <option value="collect">最多收藏</option>
+  </select>
+  <div id="stats" class="stats"></div>
+</header>
 
-      <div class="bar">
-        <div class="tabs" role="tablist">
-          <button class="tab" role="tab" aria-selected="true" id="tab-acc" data-view="acc">账号视图</button>
-          <button class="tab" role="tab" aria-selected="false" id="tab-feed" data-view="feed">选题流</button>
-        </div>
-        <label class="filter" id="vfwrap"><input type="checkbox" id="vfonly"> 仅看机构认证</label>
-        <span class="count" id="count"></span>
-      </div>
+<div class="layout">
+  <nav class="sidebar">
+    <div id="nav-all" class="nav-item active">🏠 发现</div>
+    <div class="nav-title">账号</div>
+    <div id="account-list"></div>
+  </nav>
+  <main id="feed" class="feed"></main>
+</div>
 
-      <div id="view-acc"><div class="grid" id="grid"></div></div>
-      <div id="view-feed" class="hidden"><div class="feed" id="feedlist"></div></div>
+<div id="modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="note-card" id="note-card"></div>
+</div>
 
-      <footer id="foot"></footer>
-    </div>
-  </div>
-
-  <!-- 生成时注入的运行数据（window.DATA），必须在 app.js 之前 -->
-  <script src="data.js"></script>
-  <script src="app.js"></script>
+<!-- 生成时注入的全库数据（window.FEED_DATA），必须在 app.js 之前 -->
+<script src="data.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
