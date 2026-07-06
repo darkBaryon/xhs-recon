@@ -213,7 +213,7 @@ def detail_progress(
     with _make_progress(console) as progress:
         note_task_id = progress.add_task("新帖正文/图", total=total)
         comments_task_id = progress.add_task("新帖评论", total=total)
-        state = {"note": 0, "comments": 0}
+        state = {"note": 0, "comments": 0, "comment_rows": 0}
 
         def on_progress(event: dict) -> None:
             kind = event.get("kind")
@@ -223,6 +223,14 @@ def detail_progress(
             elif kind == "comments":
                 state["comments"] += 1
                 progress.update(comments_task_id, completed=state["comments"], refresh=True)
+            elif kind == "comment_rows":
+                # 篇内子评论翻页耗时长，条形不动时用累计条数证明还活着
+                state["comment_rows"] = event.get("count", state["comment_rows"] + 1)
+                progress.update(
+                    comments_task_id,
+                    description=f"新帖评论·已收 {state['comment_rows']} 条",
+                    refresh=True,
+                )
 
         yield on_progress
 

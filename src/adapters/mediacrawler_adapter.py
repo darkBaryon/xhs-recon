@@ -41,6 +41,8 @@ _RE_DATA_FETCH_ERROR = re.compile(r"DataFetchError: (.+)")
 _RE_NOTE_DETAIL_DONE = re.compile(r"Finish get note detail, note_id")
 # 每篇评论抓完后的限速行：detail 会话里评论段是串行大头，用它逐篇推进度
 _RE_NOTE_COMMENTS_DONE = re.compile(r"Sleeping for .+ after fetching comments for note")
+# store 层每存一条评论打一行：评论段篇内耗时长（子评论翻页），用累计条数证明没卡死
+_RE_COMMENT_SAVED = re.compile(r"store\.xhs\.update_xhs_note_comment\]")
 _RE_NOTE_DETAIL_FAILED = re.compile(r"Failed to get note detail,\s*(?:Id|note_id):\s*([^,\s]+)")
 
 
@@ -818,7 +820,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         MC 的 detail 模式先并发抓全部正文（Finish 行几秒内全到），再串行逐篇抓
         评论（限速 sleep，占整段大头）——只锚正文会让进度条秒满后长时间挂满格，
         所以两个阶段各自 emit，显示层各画一条。"""
-        count = {"note": 0, "comments": 0}
+        count = {"note": 0, "comments": 0, "comment_rows": 0}
 
         def handle(line: str) -> None:
             if _RE_NOTE_DETAIL_DONE.search(line):
@@ -827,6 +829,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
             elif _RE_NOTE_COMMENTS_DONE.search(line):
                 count["comments"] += 1
                 self._emit({"kind": "comments", "count": count["comments"]})
+            elif _RE_COMMENT_SAVED.search(line):
+                count["comment_rows"] += 1
+                self._emit({"kind": "comment_rows", "count": count["comment_rows"]})
 
         return handle
 
