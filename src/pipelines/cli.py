@@ -207,6 +207,56 @@ def web(config: str = _CONFIG_OPT):
     typer.echo(f"web: {path}")
 
 
+@app.command(name="backfill-media")
+def backfill_media(
+    config: str = _CONFIG_OPT,
+    batch: int = typer.Option(30, "--batch", help="每个 detail 会话补几帖"),
+    limit: int = typer.Option(0, "--limit", help="最多补几帖（0=全部缺图帖）"),
+    verbose: bool = _VERBOSE_OPT,
+):
+    """补抓缺本地图的老帖（评论不重抓）：详情+图回填 media 库与 image_paths。
+
+    历史成因：搜索侧/早期无图库版本入库的帖被两段式增量当老帖跳过详情。"""
+    from urllib.parse import parse_qs, urlparse
+
+    _cfg, _collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
+    if store is None or not hasattr(store, "notes_missing_media"):
+        typer.echo("需要 store.enabled=true（MySQL）", err=True)
+        raise typer.Exit(1)
+    if not hasattr(adapter, "fetch_note_details"):
+        typer.echo("当前 adapter 不支持详情抓取", err=True)
+        raise typer.Exit(1)
+
+    rows = store.notes_missing_media(limit=limit)
+    logger.info("补图回填：缺图帖 %d 个，按 %d/批", len(rows), batch)
+    filled = 0
+    for i in range(0, len(rows), batch):
+        chunk = rows[i : i + batch]
+        cards = []
+        for r in chunk:
+            q = parse_qs(urlparse(r["url"]).query)
+            cards.append(
+                {
+                    "note_id": r["note_id"],
+                    "xsec_token": (q.get("xsec_token") or [""])[0],
+                    "xsec_source": (q.get("xsec_source") or ["pc_feed"])[0],
+                }
+            )
+        result = adapter.fetch_note_details(cards, runtime.now_iso(), with_comments=False)
+        got = [n for n in result.notes if n.image_paths]
+        store.upsert_notes(result.notes)
+        filled += len(got)
+        logger.info(
+            "补图批 %d/%d：请求 %d · 回图 %d%s",
+            i // batch + 1,
+            (len(rows) + batch - 1) // batch,
+            len(chunk),
+            len(got),
+            f"（{result.error}）" if result.error else "",
+        )
+    logger.info("补图回填完成：%d/%d 帖拿到本地图", filled, len(rows))
+
+
 @app.command()
 def bundle(config: str = _CONFIG_OPT):
     """把最新一跑打包成研究快照 zip（research/accounts/notes + 自描述 README，供下游程序/LLM）。"""

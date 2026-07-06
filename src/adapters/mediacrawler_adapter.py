@@ -790,16 +790,18 @@ class MediaCrawlerAdapter(ResearchAdapter):
         logger.info("列表模式：卡片 %d · 档案 %d", len(cards), len(profiles))
         return cards, profiles
 
-    def _build_detail_command(self, urls: list[str], save_path: Path) -> list[str]:
+    def _build_detail_command(
+        self, urls: list[str], save_path: Path, with_comments: bool = True
+    ) -> list[str]:
         cmd = self._base_command(save_path) + [
             "--type",
             "detail",
             "--specified_id",
             ",".join(urls),
             "--get_comment",
-            "yes",
+            "yes" if with_comments else "no",
             "--get_sub_comment",
-            "yes",
+            "yes" if with_comments else "no",
             "--max_comments_count_singlenotes",
             str(self._COMMENTS_PER_NOTE_CAP),
         ]
@@ -835,11 +837,15 @@ class MediaCrawlerAdapter(ResearchAdapter):
 
         return handle
 
-    def fetch_note_details(self, cards: list[dict], collected_at: str) -> FetchResult:
-        """详情模式：对给定卡片（新帖）抓 正文 + 一级/二级评论 + 图片，图提升到 media 库。"""
+    def fetch_note_details(
+        self, cards: list[dict], collected_at: str, with_comments: bool = True
+    ) -> FetchResult:
+        """详情模式：对给定卡片（新帖）抓 正文 + 一级/二级评论 + 图片，图提升到 media 库。
+
+        with_comments=False = 只补正文/图（评论段是大头，补图回填用它省时且少打评论接口）。"""
         save_path = self._save_path(collected_at) / "detail"
         urls = [self._card_note_url(c) for c in cards if c.get("note_id")]
-        cmd = self._build_detail_command(urls, save_path)
+        cmd = self._build_detail_command(urls, save_path, with_comments=with_comments)
         timeout = self._session_budget(self._COMMENT_PER_NOTE_SEC * max(len(urls), 1))
         on_line = self._detail_progress_parser() if self.on_progress else None
         run_error: str | None = None

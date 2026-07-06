@@ -87,11 +87,13 @@ img { display: block; }
 
 /* ── 瀑布流 ───────────────────────────── */
 .feed {
-  padding: 8px 24px 48px;
-  column-width: 226px; column-gap: 16px;
+  /* 对齐真 xhs 的呼吸感：卡片更大、间距更宽、两侧留白 */
+  padding: 12px 48px 48px;
+  column-width: 252px; column-gap: 24px;
+  max-width: 1500px; margin: 0 auto;
 }
 .card {
-  break-inside: avoid; margin-bottom: 20px;
+  break-inside: avoid; margin-bottom: 28px;
   border-radius: var(--card-r); cursor: pointer;
 }
 .card .cover {

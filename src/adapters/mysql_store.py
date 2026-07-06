@@ -340,6 +340,21 @@ class MySQLStore(Store):
             cur.execute("SELECT note_id FROM notes")
             return {r["note_id"] for r in cur.fetchall()}
 
+    def notes_missing_media(self, limit: int = 0) -> list[dict]:
+        """缺本地图且 url 带 xsec_token（可重抓详情）的笔记（补图回填用）。
+
+        历史成因：搜索侧/早期无图库版本入库的帖被两段式当老帖跳过详情，图一直没补。"""
+        sql = (
+            "SELECT note_id, url FROM notes "
+            "WHERE (image_paths='[]' OR image_paths IS NULL OR image_paths='') "
+            "AND url LIKE '%%xsec_token%%' ORDER BY published_at DESC"
+        )
+        if limit > 0:
+            sql += f" LIMIT {int(limit)}"
+        with self.conn.cursor() as cur:
+            cur.execute(sql)
+            return list(cur.fetchall())
+
     def notes_needing_comments(
         self, candidates: list[TypicalNote], refresh_days: int, now_iso: str
     ) -> list[TypicalNote]:

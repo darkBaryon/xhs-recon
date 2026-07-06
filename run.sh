@@ -6,6 +6,7 @@
 #   ./run.sh track-all  # 真实·巡逻：自动一批批 track，批间随机休眠 5-10 分钟，抓完收工
 #   ./run.sh real       # 真实·全流程（= research）
 #   ./run.sh browser    # 只启动/检查采集浏览器（专用 profile + CDP 9222）
+#   ./run.sh backfill   # 补抓缺本地图的老帖（详情+图，评论不重抓；--limit N 先小批试）
 #   ./run.sh web        # 把最新一跑渲染成本地静态站并打开（离线，无需采集）
 #   ./run.sh bundle     # 把最新一跑打包成研究快照 zip（供下游程序/LLM）
 # 主题配置默认 configs/留学辅导/run.yaml，换赛道：CONFIG=configs/<主题>/run.yaml ./run.sh track
@@ -100,6 +101,12 @@ case "$cmd" in
   browser)
     ensure_browser
     ;;
+  backfill)
+    # 补抓缺本地图的老帖（详情+图，评论不重抓）；可 --limit N 先小批试
+    ensure_browser
+    acquire_run_lock
+    uv run python -m src.pipelines.cli backfill-media --config "$CONFIG" "$@"
+    ;;
   web)
     # 把最新一跑的导出渲染成本地静态站并打开（离线，无需采集浏览器/锁）
     line="$(uv run python -m src.pipelines.cli web --config "$CONFIG" "$@")"
@@ -112,7 +119,7 @@ case "$cmd" in
     exec uv run python -m src.pipelines.cli bundle --config "$CONFIG" "$@"
     ;;
   *)
-    echo "用法: ./run.sh [demo|search|track|track-all|real|browser|web|bundle]" >&2
+    echo "用法: ./run.sh [demo|search|track|track-all|real|browser|backfill|web|bundle]" >&2
     exit 2
     ;;
 esac
