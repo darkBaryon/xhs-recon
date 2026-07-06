@@ -211,8 +211,10 @@ def detail_progress(
         yield None
         return
     with _make_progress(console) as progress:
+        # 评论条标题会滚动"已收 N 条"计数：数字定宽，让表格宽度从头到尾不变——
+        # 中途变宽会让 rich Live 重排，把旧帧顶进滚动历史留下死条
         note_task_id = progress.add_task("新帖正文/图", total=total)
-        comments_task_id = progress.add_task("新帖评论", total=total)
+        comments_task_id = progress.add_task("新帖评论·已收    0 条", total=total)
         state = {"note": 0, "comments": 0, "comment_rows": 0}
 
         def on_progress(event: dict) -> None:
@@ -224,12 +226,12 @@ def detail_progress(
                 state["comments"] += 1
                 progress.update(comments_task_id, completed=state["comments"], refresh=True)
             elif kind == "comment_rows":
-                # 篇内子评论翻页耗时长，条形不动时用累计条数证明还活着
+                # 篇内子评论翻页耗时长，条形不动时用累计条数证明还活着。
+                # 不传 refresh：每条评论一个事件，强制重绘太频；交给 10Hz 自动刷新
                 state["comment_rows"] = event.get("count", state["comment_rows"] + 1)
                 progress.update(
                     comments_task_id,
-                    description=f"新帖评论·已收 {state['comment_rows']} 条",
-                    refresh=True,
+                    description=f"新帖评论·已收 {state['comment_rows']:>4} 条",
                 )
 
         yield on_progress
