@@ -148,6 +148,34 @@ def run(db):
         assert p["verify_type"] == 2 and p["descr"] == "简介"
     print("  ✓ 落库往返 / creator 标记 / 档案")
 
+    # 6) 少量多次：按 creator_fetched_at 轮转挑批
+    for aid in ["A", "B", "C"]:
+        s.upsert_accounts(
+            [
+                Account(
+                    account_id=aid,
+                    nickname=aid,
+                    source_keywords=[],
+                    note_count=0,
+                    first_seen_at="x",
+                    last_seen_at="x",
+                )
+            ]
+        )
+    cands = ["A", "B", "C"]
+    now2 = "2026-07-10T00:00:00+00:00"
+    # 都没抓过 → 全到期，batch=2 取前 2（"" 排序稳定 = 入参序）
+    b1 = s.accounts_due_for_creator(cands, 2, 0, now2)
+    assert len(b1) == 2, "批大小未生效"
+    s.mark_creator_fetched(b1, "2026-07-09T00:00:00+00:00")  # 抓过这批（1 天前）
+    # 下一批：抓过的排后，没抓的(第 3 个)优先
+    b2 = s.accounts_due_for_creator(cands, 2, 0, now2)
+    assert b2[0] not in b1, "轮转未把已抓的排后"
+    # refresh_days=2：1 天前抓的两个未到期 → 只剩没抓过的那个
+    b3 = s.accounts_due_for_creator(cands, 5, 2, now2)
+    assert set(b3) == (set(cands) - set(b1)), "refresh 窗未跳过未到期账号"
+    print("  ✓ 少量多次：轮转挑批 + refresh 跳过未到期")
+
     s.close()
     _drop(db)  # 清理
 

@@ -134,14 +134,25 @@ def _search_stage(
     limit = config.search.limit
     window_days = config.search.window_days
 
+    # 少量多次：关键词分批成多个会话（batch<=0 = 全部一会话，旧行为）
+    batch = config.search.batch_size
+    kw_chunks = (
+        [keywords]
+        if batch <= 0
+        else [keywords[i : i + batch] for i in range(0, len(keywords), batch)]
+    )
+
     results = []
     search_many = getattr(adapter, "search_many", None)
     if callable(search_many):
         notes_per_keyword = max(limit or 20, 1) * max(pages, 1)
         t0 = perf_counter()
+        if len(kw_chunks) > 1:
+            logger.info("少量多次：%d 关键词分 %d 批会话", len(keywords), len(kw_chunks))
         with progress.search_progress(len(keywords), notes_per_keyword) as on_progress:
             with _attach_progress(adapter, on_progress):
-                results = search_many(keywords, pages, limit, collected_at)
+                for chunk in kw_chunks:
+                    results.extend(search_many(chunk, pages, limit, collected_at))
         dt = perf_counter() - t0
         for result in results:
             log_result(logger, result)
@@ -152,7 +163,7 @@ def _search_stage(
                 notes_per_keyword,
                 len(result.accounts),
             )
-        logger.info("搜索单会话：%d 个关键词 · %.1fs", len(keywords), dt)
+        logger.info("搜索：%d 个关键词 · %d 批 · %.1fs", len(keywords), len(kw_chunks), dt)
     else:
         with progress.stage_bar("搜索", total=len(keywords) * pages) as bar:
             for kw in keywords:
@@ -230,6 +241,22 @@ def _sync_stage(
         auto_top_n,
         len(watchlist),
     )
+
+    # 少量多次：只抓本次到期的一批（最久未抓优先），跨次轮转 watchlist 避免一次拉太多。
+    # 需 store（轮转状态在 creator_fetched_at 列）；self 账号永不被批次截掉（自己的号常看）。
+    batch_size = config.creator.batch_size
+    if store is not None and batch_size > 0 and watchlist:
+        due = set(
+            store.accounts_due_for_creator(
+                [wa.account_id for wa in watchlist],
+                batch_size,
+                config.creator.refresh_days,
+                collected_at,
+            )
+        )
+        kept = [wa for wa in watchlist if wa.account_id in due or wa.source == "self"]
+        logger.info("少量多次：本批抓 %d/%d 账号（最久未抓优先）", len(kept), len(watchlist))
+        watchlist = kept
 
     creator_notes: list[Note] = []
     creator_profiles: list[CreatorProfile] = []

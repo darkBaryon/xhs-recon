@@ -54,6 +54,14 @@ class Store(ABC):
         或距今超过 refresh_days（过期需刷新）。refresh_days<=0 表示只抓从没抓过的。"""
 
     @abstractmethod
+    def accounts_due_for_creator(
+        self, account_ids: list[str], batch_size: int, refresh_days: int, now_iso: str
+    ) -> list[str]:
+        """少量多次：从候选账号里挑本次该抓的一批。creator_fetched_at 为空（从没抓过）
+        优先，其次最久没抓的；抓过不足 refresh_days 的排除（未到期）。batch_size<=0 =
+        全返（不分批）。用于跨次轮转 watchlist，避免一次会话拉太多被平台盯上。"""
+
+    @abstractmethod
     def load_notes(self) -> list[Note]:
         """库中全部笔记（窗口过滤交给 core.time_window，保持 store 只存不算）。"""
 

@@ -16,6 +16,8 @@ class SearchCfg(BaseModel):
     limit: int = 20
     sort: str = ""
     window_days: int = 0
+    # 少量多次：每个 MC 会话最多 N 个关键词，其余下会话（0=全部一会话，旧行为）
+    batch_size: int = 0
 
 
 class RankingCfg(BaseModel):
@@ -32,6 +34,11 @@ class WatchlistCfg(BaseModel):
 
 class CreatorCfg(BaseModel):
     notes_per_account: int = 10
+    # 少量多次：每次 track 只抓最久未抓的 N 个账号（0=全抓，旧行为）；跨次轮转靠库
+    # 的 creator_fetched_at。需 store.enabled 才生效（否则无轮转状态）
+    batch_size: int = 0
+    # 抓过不足 N 天的账号本次跳过（未到期）；0=不按时间跳、纯轮询最旧
+    refresh_days: int = 0
 
 
 class SelectionCfg(BaseModel):

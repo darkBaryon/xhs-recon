@@ -315,6 +315,34 @@ class MySQLStore(Store):
                 out.append(c)
         return out
 
+    def accounts_due_for_creator(
+        self, account_ids: list[str], batch_size: int, refresh_days: int, now_iso: str
+    ) -> list[str]:
+        if not account_ids:
+            return []
+        placeholders = ",".join(["%s"] * len(account_ids))
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"SELECT account_id, creator_fetched_at FROM accounts "
+                f"WHERE account_id IN ({placeholders})",
+                account_ids,
+            )
+            fetched = {r["account_id"]: r["creator_fetched_at"] for r in cur.fetchall()}
+        cutoff = None
+        if refresh_days > 0:
+            cutoff = datetime.fromisoformat(now_iso) - timedelta(days=refresh_days)
+        due: list[tuple[str, str]] = []
+        for aid in account_ids:
+            at = fetched.get(aid)  # 库里没这账号 / 列为 NULL → 从没抓过
+            if at is None:
+                due.append((aid, ""))  # 空排最前 → 最高优先
+            elif cutoff is None or _before(at, cutoff):
+                due.append((aid, at))
+            # 抓过且未到期 → 不入选（本次跳过）
+        due.sort(key=lambda x: x[1])  # 从没抓("")在前，其余按时间最旧优先
+        ids = [aid for aid, _ in due]
+        return ids if batch_size <= 0 else ids[:batch_size]
+
     def load_notes(self) -> list[Note]:
         with self.conn.cursor() as cur:
             cur.execute("SELECT * FROM notes")
