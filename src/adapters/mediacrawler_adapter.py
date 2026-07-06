@@ -8,6 +8,7 @@ Playwright 环境与登录态，不进 CI。
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -38,6 +39,8 @@ _RE_SEARCH_PAGE_START = re.compile(r"search Xiaohongshu keyword: (.*), page: (\d
 _RE_CAPTCHA = re.compile(r"CAPTCHA appeared, request failed, ([^\n]+)")
 _RE_DATA_FETCH_ERROR = re.compile(r"DataFetchError: (.+)")
 _RE_NOTE_DETAIL_DONE = re.compile(r"Finish get note detail, note_id")
+# 每篇评论抓完后的限速行：detail 会话里评论段是串行大头，用它逐篇推进度
+_RE_NOTE_COMMENTS_DONE = re.compile(r"Sleeping for .+ after fetching comments for note")
 _RE_NOTE_DETAIL_FAILED = re.compile(r"Failed to get note detail,\s*(?:Id|note_id):\s*([^,\s]+)")
 
 
@@ -244,13 +247,18 @@ class MediaCrawlerAdapter(ResearchAdapter):
             stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
+            # 强制子进程无缓冲：否则 MC 的 stdout 块缓冲，进度事件会攒到进程结束才涌出，
+            # 进度条中途收不到、退出时才 snap 到满（短会话尤其明显）
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         ) as p:
             # 读管道放子线程：主线程用 p.wait(timeout) 管超时，读线程永不阻塞超时判定
             # on_line 抛异常必须就地吞掉：读线程一死没人排空管道，子进程写满
             # 缓冲区会被堵住 → 被误判超时 kill；输出也会静默截断
             def _pump() -> None:
                 assert p.stdout is not None
-                for line in p.stdout:
+                # 用 readline 而非 `for line in p.stdout`：后者迭代器会 readahead 预读一整块，
+                # 导致行攒着不吐、进度条中途收不到；readline 来一行吐一行，真流式
+                for line in iter(p.stdout.readline, ""):
                     lines.append(line)
                     if on_line is not None:
                         try:
@@ -799,16 +807,35 @@ class MediaCrawlerAdapter(ResearchAdapter):
         source = card.get("xsec_source") or "pc_feed"
         return f"https://www.xiaohongshu.com/explore/{nid}?xsec_token={token}&xsec_source={source}"
 
+    def _detail_progress_parser(self) -> Callable[[str], None]:
+        """逐行解析 detail 会话输出：正文完成 emit note，评论完成 emit comments。
+
+        MC 的 detail 模式先并发抓全部正文（Finish 行几秒内全到），再串行逐篇抓
+        评论（限速 sleep，占整段大头）——只锚正文会让进度条秒满后长时间挂满格，
+        所以两个阶段各自 emit，显示层各画一条。"""
+        count = {"note": 0, "comments": 0}
+
+        def handle(line: str) -> None:
+            if _RE_NOTE_DETAIL_DONE.search(line):
+                count["note"] += 1
+                self._emit({"kind": "note", "count": count["note"]})
+            elif _RE_NOTE_COMMENTS_DONE.search(line):
+                count["comments"] += 1
+                self._emit({"kind": "comments", "count": count["comments"]})
+
+        return handle
+
     def fetch_note_details(self, cards: list[dict], collected_at: str) -> FetchResult:
         """详情模式：对给定卡片（新帖）抓 正文 + 一级/二级评论 + 图片，图提升到 media 库。"""
         save_path = self._save_path(collected_at) / "detail"
         urls = [self._card_note_url(c) for c in cards if c.get("note_id")]
         cmd = self._build_detail_command(urls, save_path)
         timeout = self._session_budget(self._COMMENT_PER_NOTE_SEC * max(len(urls), 1))
+        on_line = self._detail_progress_parser() if self.on_progress else None
         run_error: str | None = None
         out = ""
         try:
-            _rc, out = self._run_crawler(cmd, timeout=timeout)
+            _rc, out = self._run_crawler(cmd, timeout=timeout, on_line=on_line)
             self._write_crawler_log(save_path, out)
         except subprocess.TimeoutExpired as e:
             run_error = f"detail timed out after {timeout}s"

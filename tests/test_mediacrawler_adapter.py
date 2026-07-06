@@ -840,6 +840,38 @@ def test_creator_progress_events_from_mc_output(tmp_path, monkeypatch):
     ]
 
 
+def test_detail_progress_events_two_stages(tmp_path, monkeypatch):
+    """detail 会话：正文 Finish 行 → note 事件；评论限速行 → comments 事件。"""
+    a = _adapter(tmp_path)
+    events = []
+    a.on_progress = events.append
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        assert on_line is not None
+        for line in [
+            "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+            "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
+            "some unrelated log line\n",
+            "[XiaoHongShuCrawler.get_comments] Sleeping for 1.0 seconds "
+            "after fetching comments for note n1\n",
+            "[XiaoHongShuCrawler.get_comments] Sleeping for 1.0 seconds "
+            "after fetching comments for note n2\n",
+        ]:
+            on_line(line)
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    cards = [{"note_id": "n1", "xsec_token": "t1"}, {"note_id": "n2", "xsec_token": "t2"}]
+    a.fetch_note_details(cards, "2026-07-06T00:00:00Z")
+
+    assert events == [
+        {"kind": "note", "count": 1},
+        {"kind": "note", "count": 2},
+        {"kind": "comments", "count": 1},
+        {"kind": "comments", "count": 2},
+    ]
+
+
 def test_creator_no_callback_means_no_parser(tmp_path, monkeypatch):
     """未注入 on_progress（默认）：不建解析器，_run_crawler 收到 on_line=None。"""
     a = _adapter(tmp_path)

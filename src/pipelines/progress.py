@@ -198,6 +198,36 @@ def search_progress(
 
 
 @contextmanager
+def detail_progress(
+    total: int, console: Console | None = None
+) -> Iterator[ProgressCallback | None]:
+    """两段式详情段进度：yield adapter 进度事件回调（非 TTY 时 None）。
+
+    MC detail 会话分两个阶段：正文/图并发抓（note 事件几秒内全到）、评论串行
+    限速抓（comments 事件才是真实节奏）——各画一条，避免单条秒满后挂满格。
+    """
+    console = console or _default_console()
+    if not _can_render(console) or total <= 0:
+        yield None
+        return
+    with _make_progress(console) as progress:
+        note_task_id = progress.add_task("新帖正文/图", total=total)
+        comments_task_id = progress.add_task("新帖评论", total=total)
+        state = {"note": 0, "comments": 0}
+
+        def on_progress(event: dict) -> None:
+            kind = event.get("kind")
+            if kind == "note":
+                state["note"] += 1
+                progress.update(note_task_id, completed=state["note"], refresh=True)
+            elif kind == "comments":
+                state["comments"] += 1
+                progress.update(comments_task_id, completed=state["comments"], refresh=True)
+
+        yield on_progress
+
+
+@contextmanager
 def spinner(description: str, console: Console | None = None) -> Iterator[None]:
     """无进度语义的长等待（评论段用）：转圈提示。非 TTY 时无输出。"""
     console = console or _default_console()

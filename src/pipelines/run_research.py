@@ -203,7 +203,8 @@ def _creator_two_phase(
 
     稳态某账号没发新帖 → 详情/评论/图请求全省，只花列表那一个请求。
     """
-    cards, profiles = adapter.list_creator_notes(account_ids, collected_at)
+    with progress.spinner(f"列表模式：{len(account_ids)} 个账号主页…"):
+        cards, profiles = adapter.list_creator_notes(account_ids, collected_at)
     known = store.known_note_ids()
     new_cards = [c for c in cards if c.get("note_id") and c["note_id"] not in known]
     logger.info("两段式：列表 %d 帖 · 新帖 %d（老帖跳过详情）", len(cards), len(new_cards))
@@ -212,7 +213,10 @@ def _creator_two_phase(
     comments: list[Comment] = []
     accounts: list[Account] = []
     if new_cards:
-        result = adapter.fetch_note_details(new_cards, collected_at)
+        # 详情段是慢的部分（每篇 正文+评论+图），adapter 逐篇 emit 事件推进度
+        with progress.detail_progress(len(new_cards)) as on_prog:
+            with _attach_progress(adapter, on_prog):
+                result = adapter.fetch_note_details(new_cards, collected_at)
         log_result(logger, result)
         notes, comments, accounts = result.notes, result.comments, result.accounts
         logger.info("两段式：新帖详情 %d · 评论 %d", len(notes), len(comments))
