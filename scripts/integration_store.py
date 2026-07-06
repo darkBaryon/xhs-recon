@@ -180,10 +180,62 @@ def run(db):
     _drop(db)  # 清理
 
 
+def migration_check(db):
+    """模拟历史旧 schema（缺 notes 列 + comments 旧四列结构），构造 MySQLStore 应自愈。"""
+    _drop(db)
+    boot = pymysql.connect(read_default_file=os.path.expanduser("~/.my.cnf"), charset="utf8mb4")
+    with boot.cursor() as cur:
+        cur.execute(f"CREATE DATABASE `{db}` CHARACTER SET utf8mb4")
+        cur.execute(f"USE `{db}`")
+        # 旧 notes（无 note_type/image_paths 等）
+        cur.execute(
+            "CREATE TABLE notes (note_id VARCHAR(64) PRIMARY KEY, account_id VARCHAR(64),"
+            " title TEXT, body LONGTEXT, tags LONGTEXT, url TEXT, like_count INT,"
+            " collect_count INT, comment_count INT, published_at VARCHAR(40),"
+            " source_keywords LONGTEXT, raw_path TEXT, first_collected_at VARCHAR(40),"
+            " last_collected_at VARCHAR(40), comments_fetched_at VARCHAR(40)) CHARACTER SET utf8mb4"
+        )
+        # 旧 comments（四列结构，PK note_id+body_hash，无 comment_key）
+        cur.execute(
+            "CREATE TABLE comments (note_id VARCHAR(64), body_hash CHAR(64), body LONGTEXT,"
+            " like_count INT, collected_at VARCHAR(40), PRIMARY KEY(note_id, body_hash))"
+            " CHARACTER SET utf8mb4"
+        )
+    boot.commit()
+    boot.close()
+
+    s = MySQLStore(db)  # 构造即迁移
+    # 迁移后 notes 全字段可插、comments 全字段可插
+    s.upsert_notes([_note("N1", "2026-07-01T00:00:00+00:00")])
+    s.upsert_comments(
+        [
+            Comment(
+                body="评论",
+                note_id="N1",
+                like_count=1,
+                collected_at="x",
+                comment_id="c1",
+                author_id="u1",
+                ip_location="上海",
+            )
+        ]
+    )
+    with s.conn.cursor() as cur:
+        cur.execute("SELECT note_type, image_paths FROM notes WHERE note_id='N1'")
+        assert cur.fetchone() is not None, "notes 未补列"
+        cur.execute("SELECT comment_id, author_id, ip_location FROM comments WHERE note_id='N1'")
+        r = cur.fetchone()
+        assert r["comment_id"] == "c1" and r["author_id"] == "u1", "comments 未重建为全字段"
+    s.close()
+    _drop(db)
+    print("  ✓ schema 自愈：旧库补 notes 列 + 重建 comments 全字段")
+
+
 def main():
     db = sys.argv[1] if len(sys.argv) > 1 else "xhs_recon_itest"
     print(f"MySQLStore 真库验收（测试库 {db}）：")
     run(db)
+    migration_check(db)
     print("OK：全部通过")
     return 0
 
