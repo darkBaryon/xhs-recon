@@ -323,8 +323,8 @@ def test_build_creator_command_can_disable_image_download(tmp_path):
     assert "--get_images" not in cmd
 
 
-def test_attach_image_paths_fills_downloaded_files(tmp_path):
-    """MC 落图在 {save_path}/xhs/images/{note_id}/ → 回填 note.image_paths；没图保持 []。"""
+def test_promote_images_copies_raw_to_media(tmp_path):
+    """MC 下到 raw 的图复制到持久 media 库，image_paths 存 media 绝对路径；没图保持 []。"""
     from src.models import Note
 
     def _note(nid):
@@ -344,16 +344,21 @@ def test_attach_image_paths_fills_downloaded_files(tmp_path):
             raw_path="",
         )
 
-    save = tmp_path / "creator"
+    save = tmp_path / "raw" / "creator"
     img_dir = save / "xhs" / "images" / "n1"
     img_dir.mkdir(parents=True)
     (img_dir / "0.jpg").write_bytes(b"x")
     (img_dir / "1.jpg").write_bytes(b"y")
 
+    media = tmp_path / "media"
     notes = [_note("n1"), _note("n2")]
-    _adapter(tmp_path)._attach_image_paths(notes, save)
+    _adapter(tmp_path, media_dir=str(media))._promote_images(notes, save)
 
+    # image_paths 指向 media（不是 raw）、绝对、文件真复制过去了
     assert [Path(p).name for p in notes[0].image_paths] == ["0.jpg", "1.jpg"]
+    assert all(Path(p).is_absolute() for p in notes[0].image_paths)
+    assert all(str(media.resolve()) in p for p in notes[0].image_paths)
+    assert (media / "xhs" / "n1" / "0.jpg").read_bytes() == b"x"
     assert notes[1].image_paths == []
 
 

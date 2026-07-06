@@ -8,6 +8,7 @@ Playwright 环境与登录态，不进 CI。
 import hashlib
 import logging
 import re
+import shutil
 import subprocess
 import threading
 from collections.abc import Callable
@@ -80,6 +81,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         sleep_sec: float = 2.0,
         timeout: int = 600,
         download_images: bool = True,
+        media_dir: str = "data/media",
         launcher: list[str] | None = None,
     ):
         self.mediacrawler_dir = str(mediacrawler_dir)
@@ -92,6 +94,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         # 全量采集：creator 会话下载原图到本地（XHS 图片 URL 带时间签名、几天即 403，
         # 只有爬取当下下载才永久可看）；search 保持轻量不下图
         self.download_images = download_images
+        # 持久图片库：MC 下到 raw（临时可清理），采后复制到此（按 note_id 组织、永不自动清理）
+        self.media_dir = Path(media_dir).resolve()
         self.max_concurrency = max_concurrency
         self.sleep_sec = sleep_sec
         self.timeout = timeout
@@ -308,19 +312,29 @@ class MediaCrawlerAdapter(ResearchAdapter):
             lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
         )
 
-    def _attach_image_paths(self, notes: list[Note], save_path: Path) -> None:
-        """把 MC 下载的原图路径填进 note.image_paths（就地）。
+    def _promote_images(self, notes: list[Note], save_path: Path) -> None:
+        """把 MC 下到 raw 的原图复制到持久 media 库，image_paths 存 media 绝对路径（就地）。
 
-        MC 落图在 {save_path}/xhs/images/{note_id}/<N>.jpg（视频 videos/ 同构）。
-        存绝对路径字符串：图片在 gitignore 的 data/raw 下，仅本机消费。没图的笔记保持 []。
+        MC 落图在 {save_path}/xhs/images/{note_id}/<N>.jpg（临时暂存，可清理）；
+        复制到 {media_dir}/xhs/{note_id}/<N>.jpg（持久库，按 note_id 去重、永不自动清理）。
+        存绝对路径 → 哪个 cwd 都能 open、raw 清了也不受影响。没图的笔记保持 []。
         """
         img_root = save_path / "xhs" / "images"
         if not img_root.is_dir():
             return
         for n in notes:
-            d = img_root / n.note_id
-            if d.is_dir():
-                n.image_paths = sorted(str(p) for p in d.iterdir() if p.is_file())
+            src = img_root / n.note_id
+            if not src.is_dir():
+                continue
+            dst = self.media_dir / "xhs" / n.note_id
+            dst.mkdir(parents=True, exist_ok=True)
+            paths = []
+            for f in sorted(p for p in src.iterdir() if p.is_file()):
+                target = dst / f.name
+                shutil.copy2(f, target)  # 复制而非移动：raw 作全量备份，用户想清再清
+                paths.append(str(target.resolve()))
+            if paths:
+                n.image_paths = paths
 
     def _read_creator_profiles(self, save_path: Path, collected_at: str):
         # 档案软信号：旧版 fork 无此文件 / 抓取失败 / 罕见 IO 异常 → 空列表，
@@ -670,8 +684,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
             profiles = self._read_creator_profiles(save_path, collected_at)
             # 全量：同会话带回的评论也一并读出（get_comment=yes 落在 *_comments_*.jsonl）
             comments = self._read_comments(save_path, collected_at)
-            # 全量：下载的原图路径回填（download_images=yes 落在 xhs/images/{note_id}/）
-            self._attach_image_paths(notes, save_path)
+            # 全量：把下载的原图从 raw 提升到持久 media 库，image_paths 存 media 绝对路径
+            self._promote_images(notes, save_path)
         except (OSError, ValueError) as e:
             self._write_crawler_log(save_path, f"read creator failed: {e}")
         if rc not in (0, None):

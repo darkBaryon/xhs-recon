@@ -67,6 +67,8 @@ class MediaCrawlerCfg(BaseModel):
     sleep_sec: float = 2.0
     # 全量采集：creator 会话下载原图到本地（URL 带时间签名几天即失效，唯下载可永久看）
     download_images: bool = True
+    # 持久图片库：采后把原图从 raw（临时）复制到此（按 note_id 组织、不随 raw 清理）
+    media_dir: str = "data/media"
 
 
 class LoggingCfg(BaseModel):
