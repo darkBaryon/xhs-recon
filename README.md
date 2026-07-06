@@ -21,17 +21,16 @@
 **一键**（自动确保采集浏览器就绪；主题默认留学辅导，换赛道 `CONFIG=configs/<主题>/run.yaml ./run.sh track`）：
 
 ```bash
-./run.sh            # 离线 fixture demo（无需登录/浏览器）
-./run.sh search     # 真实·广角：关键词搜索+榜单（进入新领域时）
-./run.sh track      # 真实·长焦：watchlist→creator 主页/档案（日常盯人，可独立跑）
-./run.sh comments   # 真实·深读：补采评论（做深度分析时）
+./run.sh            # 离线 fixture demo（无需登录/浏览器，用 configs/sample.yaml）
+./run.sh search     # 真实·广角：关键词搜索+榜单（关键词分批，进入新领域时）
+./run.sh track      # 真实·长焦：watchlist→creator（含评论+原图，账号轮转，日常盯人）
 ./run.sh real       # 真实·全流程（= research）
 ./run.sh browser    # 只起/查采集浏览器
 ./run.sh web        # 把最新一跑的导出渲染成本地静态站并打开（离线，无需采集）
 ./run.sh bundle     # 把最新一跑打包成研究快照 zip（供下游程序/LLM）
 ```
 
-分工：**search** 冷启动发现账号（建当次运行目录），**track** 盯已知账号、**comments** 补采评论。search → comments 与「紧接 search 的 track」都 **补全写回** 同一目录（`latest` 指向这份逐步补全的快照）。熟悉领域后账号已在 config 的 `watchlist.manual` 里，可**只跑 track**：它自建新运行目录逐次归档，auto 名额沿用上一次 search 的榜单（缺榜单则纯 manual）。等价直调：`uv run python -m src.pipelines.cli <子命令> --config configs/留学辅导/run.yaml`；旧入口 `python -m src.pipelines.run_research --config ...` 不变。
+分工：**search** 冷启动发现账号，**track** 盯已知账号（评论+原图随 creator 笔记一次抓回，无单独 comments 命令）。熟悉领域后账号已在 config 的 `watchlist.manual` 里，可**只跑 track**：靠库的 `creator_fetched_at` 轮转账号（`creator.batch_size` 每次只碰最久未抓的 N 个，少量多次）。等价直调：`uv run python -m src.pipelines.cli <子命令> --config configs/留学辅导/run.yaml`。
 
 ### 离线跑通（无需登录，随时可跑）
 

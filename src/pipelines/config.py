@@ -16,6 +16,8 @@ class SearchCfg(BaseModel):
     limit: int = 20
     sort: str = ""
     window_days: int = 0
+    # 少量多次：每个 MC 会话最多 N 个关键词，其余下会话（0=全部一会话，旧行为）
+    batch_size: int = 0
 
 
 class RankingCfg(BaseModel):
@@ -32,6 +34,11 @@ class WatchlistCfg(BaseModel):
 
 class CreatorCfg(BaseModel):
     notes_per_account: int = 10
+    # 少量多次：每次 track 只抓最久未抓的 N 个账号（0=全抓，旧行为）；跨次轮转靠库
+    # 的 creator_fetched_at。需 store.enabled 才生效（否则无轮转状态）
+    batch_size: int = 0
+    # 抓过不足 N 天的账号本次跳过（未到期）；0=不按时间跳、纯轮询最旧
+    refresh_days: int = 0
 
 
 class SelectionCfg(BaseModel):
@@ -45,6 +52,8 @@ class CommentsCfg(BaseModel):
     report_top_k: int = 3
     # 采评论的典型笔记上限（按分数截前 N，防批量超时）
     max_notes: int = 30
+    # 增量：距上次抓评论超过 refresh_days 才重抓；<=0 = 只抓从没抓过的（最省请求）
+    refresh_days: int = 0
     fixture_path: str | None = None
 
 
@@ -56,6 +65,10 @@ class MediaCrawlerCfg(BaseModel):
     timeout: int = 600
     max_concurrency: int = 1
     sleep_sec: float = 2.0
+    # 全量采集：creator 会话下载原图到本地（URL 带时间签名几天即失效，唯下载可永久看）
+    download_images: bool = True
+    # 持久图片库：采后把原图从 raw（临时）复制到此（按 note_id 组织、不随 raw 清理）
+    media_dir: str = "data/media"
 
 
 class LoggingCfg(BaseModel):
@@ -66,6 +79,13 @@ class LoggingCfg(BaseModel):
 
 class ExportCfg(BaseModel):
     out_dir: str = "data/exports"
+
+
+class StoreCfg(BaseModel):
+    # enabled=False → 不建库，行为与旧版一致（全量、per-run 目录）；真实配置里置 true 开增量
+    enabled: bool = False
+    # 本机 MySQL 的独立库（凭据自 ~/.my.cnf）；与 uni_atlas 的 study_abroad 同服务器异库
+    database: str = "xhs_recon"
 
 
 class RunConfig(BaseModel):
@@ -90,3 +110,4 @@ class RunConfig(BaseModel):
     mediacrawler: MediaCrawlerCfg = MediaCrawlerCfg()
     logging: LoggingCfg = LoggingCfg()
     export: ExportCfg = ExportCfg()
+    store: StoreCfg = StoreCfg()

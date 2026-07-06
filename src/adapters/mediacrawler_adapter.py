@@ -6,8 +6,11 @@ Playwright 环境与登录态，不进 CI。
 """
 
 import hashlib
+import json
 import logging
+import os
 import re
+import shutil
 import subprocess
 import threading
 from collections.abc import Callable
@@ -20,7 +23,7 @@ from src.adapters.parsers import (
     parse_jsonl_lines,
 )
 from src.core.ports import ResearchAdapter
-from src.models import Account, CreatorProfile, FetchResult, Note, TypicalNote
+from src.models import Account, Comment, CreatorProfile, FetchResult, Note, TypicalNote
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,8 @@ _RE_SEARCH_PAGE_START = re.compile(r"search Xiaohongshu keyword: (.*), page: (\d
 _RE_CAPTCHA = re.compile(r"CAPTCHA appeared, request failed, ([^\n]+)")
 _RE_DATA_FETCH_ERROR = re.compile(r"DataFetchError: (.+)")
 _RE_NOTE_DETAIL_DONE = re.compile(r"Finish get note detail, note_id")
+# 每篇评论抓完后的限速行：detail 会话里评论段是串行大头，用它逐篇推进度
+_RE_NOTE_COMMENTS_DONE = re.compile(r"Sleeping for .+ after fetching comments for note")
 _RE_NOTE_DETAIL_FAILED = re.compile(r"Failed to get note detail,\s*(?:Id|note_id):\s*([^,\s]+)")
 
 
@@ -64,6 +69,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
     _SEARCH_PER_KEYWORD_PAGE_SEC = 120
     # 单会话 comments 超时按笔记数缩放的每笔记预算（秒）：扁平 600s 对 30 篇不够（实测超时）
     _COMMENT_PER_NOTE_SEC = 120
+    # 全量采集：creator 抓每篇笔记随带的一级评论上限（二级评论另计）
+    _COMMENTS_PER_NOTE_CAP = 30
 
     def __init__(
         self,
@@ -77,6 +84,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         max_concurrency: int = 1,
         sleep_sec: float = 2.0,
         timeout: int = 600,
+        download_images: bool = True,
+        media_dir: str = "data/media",
         launcher: list[str] | None = None,
     ):
         self.mediacrawler_dir = str(mediacrawler_dir)
@@ -86,6 +95,11 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self.cookies = cookies
         self.sort_type = sort_type
         self.max_notes = max_notes
+        # 全量采集：creator 会话下载原图到本地（XHS 图片 URL 带时间签名、几天即 403，
+        # 只有爬取当下下载才永久可看）；search 保持轻量不下图
+        self.download_images = download_images
+        # 持久图片库：MC 下到 raw（临时可清理），采后复制到此（按 note_id 组织、永不自动清理）
+        self.media_dir = Path(media_dir).resolve()
         self.max_concurrency = max_concurrency
         self.sleep_sec = sleep_sec
         self.timeout = timeout
@@ -187,18 +201,24 @@ class MediaCrawlerAdapter(ResearchAdapter):
     ) -> list[str]:
         # 单会话多账号:--creator_id 接受逗号分隔列表，MC 在一次会话里顺序拉完
         # （省掉逐账号的浏览器启动开销）；单并发与 sleep 间隔来自 _base_command，速率不放大。
+        # 全量采集：creator 同会话带回每篇笔记的一级+二级评论（省掉单独 comments 命令）。
         cmd = self._base_command(save_path) + [
             "--type",
             "creator",
             "--creator_id",
             ",".join(account_ids),
             "--get_comment",
-            "no",
+            "yes",
             "--get_sub_comment",
-            "no",
+            "yes",
+            "--max_comments_count_singlenotes",
+            str(self._COMMENTS_PER_NOTE_CAP),
             "--crawler_max_notes_count",
             str(limit or self.max_notes),
         ]
+        if self.download_images:
+            # fork 加的透传 flag（缺省 no）：下载原图到 {save_path}/xhs/images/{note_id}/
+            cmd += ["--get_images", "yes"]
         return self._append_cookies(cmd)
 
     def _session_budget(self, scaled: int) -> int:
@@ -227,13 +247,18 @@ class MediaCrawlerAdapter(ResearchAdapter):
             stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
+            # 强制子进程无缓冲：否则 MC 的 stdout 块缓冲，进度事件会攒到进程结束才涌出，
+            # 进度条中途收不到、退出时才 snap 到满（短会话尤其明显）
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         ) as p:
             # 读管道放子线程：主线程用 p.wait(timeout) 管超时，读线程永不阻塞超时判定
             # on_line 抛异常必须就地吞掉：读线程一死没人排空管道，子进程写满
             # 缓冲区会被堵住 → 被误判超时 kill；输出也会静默截断
             def _pump() -> None:
                 assert p.stdout is not None
-                for line in p.stdout:
+                # 用 readline 而非 `for line in p.stdout`：后者迭代器会 readahead 预读一整块，
+                # 导致行攒着不吐、进度条中途收不到；readline 来一行吐一行，真流式
+                for line in iter(p.stdout.readline, ""):
                     lines.append(line)
                     if on_line is not None:
                         try:
@@ -295,6 +320,30 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return parse_jsonl_lines(
             lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
         )
+
+    def _promote_images(self, notes: list[Note], save_path: Path) -> None:
+        """把 MC 下到 raw 的原图复制到持久 media 库，image_paths 存 media 绝对路径（就地）。
+
+        MC 落图在 {save_path}/xhs/images/{note_id}/<N>.jpg（临时暂存，可清理）；
+        复制到 {media_dir}/xhs/{note_id}/<N>.jpg（持久库，按 note_id 去重、永不自动清理）。
+        存绝对路径 → 哪个 cwd 都能 open、raw 清了也不受影响。没图的笔记保持 []。
+        """
+        img_root = save_path / "xhs" / "images"
+        if not img_root.is_dir():
+            return
+        for n in notes:
+            src = img_root / n.note_id
+            if not src.is_dir():
+                continue
+            dst = self.media_dir / "xhs" / n.note_id
+            dst.mkdir(parents=True, exist_ok=True)
+            paths = []
+            for f in sorted(p for p in src.iterdir() if p.is_file()):
+                target = dst / f.name
+                shutil.copy2(f, target)  # 复制而非移动：raw 作全量备份，用户想清再清
+                paths.append(str(target.resolve()))
+            if paths:
+                n.image_paths = paths
 
     def _read_creator_profiles(self, save_path: Path, collected_at: str):
         # 档案软信号：旧版 fork 无此文件 / 抓取失败 / 罕见 IO 异常 → 空列表，
@@ -638,9 +687,14 @@ class MediaCrawlerAdapter(ResearchAdapter):
         notes: list[Note] = []
         accounts: list[Account] = []
         profiles: list[CreatorProfile] = []
+        comments: list[Comment] = []
         try:
             notes, accounts = self._read_creator_results(save_path, collected_at)
             profiles = self._read_creator_profiles(save_path, collected_at)
+            # 全量：同会话带回的评论也一并读出（get_comment=yes 落在 *_comments_*.jsonl）
+            comments = self._read_comments(save_path, collected_at)
+            # 全量：把下载的原图从 raw 提升到持久 media 库，image_paths 存 media 绝对路径
+            self._promote_images(notes, save_path)
         except (OSError, ValueError) as e:
             self._write_crawler_log(save_path, f"read creator failed: {e}")
         if rc not in (0, None):
@@ -672,7 +726,144 @@ class MediaCrawlerAdapter(ResearchAdapter):
             notes=notes,
             accounts=accounts,
             profiles=profiles,
+            comments=comments,
             raw_path=str(save_path),
             error=error,
+            command=" ".join(cmd),
+        )
+
+    # ---- 两段式增量：列表 → 库 diff → 只抓新帖详情 ----
+    def _build_list_command(self, account_ids: list[str], save_path: Path) -> list[str]:
+        # creator + --list_only：只拉主页 note 列表（id/token/卡片计数），跳详情/评论/图
+        cmd = self._base_command(save_path) + [
+            "--type",
+            "creator",
+            "--creator_id",
+            ",".join(account_ids),
+            "--list_only",
+            "yes",
+            "--crawler_max_notes_count",
+            str(self.max_notes),
+        ]
+        return self._append_cookies(cmd)
+
+    def _read_note_cards(self, save_path: Path, collected_at: str) -> list[dict]:
+        cards = []
+        for line in self._read_jsonl(save_path, "xhs/jsonl/*_notelist_*.jsonl"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                cards.append(json.loads(line))
+            except ValueError:
+                continue  # 坏行跳过，不坏整跑
+        return cards
+
+    def list_creator_notes(
+        self, account_ids: list[str], collected_at: str
+    ) -> tuple[list[dict], list[CreatorProfile]]:
+        """列表模式：只拉 note 卡片（id/token/计数）+ 创作者档案，不抓详情。省请求的大头。"""
+        save_path = self._save_path(collected_at) / "creator-list"
+        cmd = self._build_list_command(account_ids, save_path)
+        timeout = self._session_budget(self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
+        try:
+            _rc, out = self._run_crawler(cmd, timeout=timeout)
+            self._write_crawler_log(save_path, out)
+        except subprocess.TimeoutExpired as e:
+            self._write_crawler_log(save_path, f"list timed out {timeout}s\n{e.output or ''}")
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+            self._write_crawler_log(save_path, f"list run failed: {e}")
+        cards: list[dict] = []
+        profiles: list[CreatorProfile] = []
+        try:
+            cards = self._read_note_cards(save_path, collected_at)
+            profiles = self._read_creator_profiles(save_path, collected_at)
+        except (OSError, ValueError) as e:
+            self._write_crawler_log(save_path, f"read list failed: {e}")
+        logger.info("列表模式：卡片 %d · 档案 %d", len(cards), len(profiles))
+        return cards, profiles
+
+    def _build_detail_command(self, urls: list[str], save_path: Path) -> list[str]:
+        cmd = self._base_command(save_path) + [
+            "--type",
+            "detail",
+            "--specified_id",
+            ",".join(urls),
+            "--get_comment",
+            "yes",
+            "--get_sub_comment",
+            "yes",
+            "--max_comments_count_singlenotes",
+            str(self._COMMENTS_PER_NOTE_CAP),
+        ]
+        if self.download_images:
+            cmd += ["--get_images", "yes"]
+        return self._append_cookies(cmd)
+
+    @staticmethod
+    def _card_note_url(card: dict) -> str:
+        nid = card.get("note_id", "")
+        token = card.get("xsec_token", "")
+        source = card.get("xsec_source") or "pc_feed"
+        return f"https://www.xiaohongshu.com/explore/{nid}?xsec_token={token}&xsec_source={source}"
+
+    def _detail_progress_parser(self) -> Callable[[str], None]:
+        """逐行解析 detail 会话输出：正文完成 emit note，评论完成 emit comments。
+
+        MC 的 detail 模式先并发抓全部正文（Finish 行几秒内全到），再串行逐篇抓
+        评论（限速 sleep，占整段大头）——只锚正文会让进度条秒满后长时间挂满格，
+        所以两个阶段各自 emit，显示层各画一条。"""
+        count = {"note": 0, "comments": 0}
+
+        def handle(line: str) -> None:
+            if _RE_NOTE_DETAIL_DONE.search(line):
+                count["note"] += 1
+                self._emit({"kind": "note", "count": count["note"]})
+            elif _RE_NOTE_COMMENTS_DONE.search(line):
+                count["comments"] += 1
+                self._emit({"kind": "comments", "count": count["comments"]})
+
+        return handle
+
+    def fetch_note_details(self, cards: list[dict], collected_at: str) -> FetchResult:
+        """详情模式：对给定卡片（新帖）抓 正文 + 一级/二级评论 + 图片，图提升到 media 库。"""
+        save_path = self._save_path(collected_at) / "detail"
+        urls = [self._card_note_url(c) for c in cards if c.get("note_id")]
+        cmd = self._build_detail_command(urls, save_path)
+        timeout = self._session_budget(self._COMMENT_PER_NOTE_SEC * max(len(urls), 1))
+        on_line = self._detail_progress_parser() if self.on_progress else None
+        run_error: str | None = None
+        out = ""
+        try:
+            _rc, out = self._run_crawler(cmd, timeout=timeout, on_line=on_line)
+            self._write_crawler_log(save_path, out)
+        except subprocess.TimeoutExpired as e:
+            run_error = f"detail timed out after {timeout}s"
+            self._write_crawler_log(save_path, f"{run_error}\n{e.output or ''}")
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+            run_error = f"run failed: {e}"
+            self._write_crawler_log(save_path, run_error)
+        notes: list[Note] = []
+        accounts: list[Account] = []
+        comments: list[Comment] = []
+        try:
+            # detail 模式写 detail_contents_*.jsonl（与 creator/search 同格式，同一 parser）
+            lines = self._read_jsonl(save_path, "xhs/jsonl/*_contents_*.jsonl")
+            notes, accounts = parse_jsonl_lines(
+                lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
+            )
+            comments = self._read_comments(save_path, collected_at)
+            self._promote_images(notes, save_path)
+        except (OSError, ValueError) as e:
+            self._write_crawler_log(save_path, f"read detail failed: {e}")
+        return FetchResult(
+            provider=self.provider_name,
+            operation="note_details",
+            collected_at=collected_at,
+            notes=notes,
+            accounts=accounts,
+            comments=comments,
+            raw_path=str(save_path),
+            error=run_error,
             command=" ".join(cmd),
         )

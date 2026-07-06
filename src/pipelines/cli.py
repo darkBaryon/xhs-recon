@@ -1,9 +1,9 @@
-"""子命令路由：search（广角）/ track（盯人）/ comments（评论深读）/ research（全流程）。
+"""子命令路由：search（广角）/ track（盯人，评论随笔记抓回）/ research（全流程）。
 
 路由层只做「读配置 → 建 adapter → 调阶段函数 → 导出」；业务全在 core 与
 run_research 的阶段函数里。命令间靠 data/exports/latest/ 的文件契约衔接：
-search 建当次运行目录，comments 补全写回该目录；track 紧接 search 时补全写回、
-独立跑时自建新目录逐次归档（熟悉领域后只跑 track 即可，不必先 search）。
+search 建当次运行目录；track 紧接 search 时补全写回、独立跑时自建新目录逐次归档
+（熟悉领域后只跑 track 即可，不必先 search）。评论随 creator 笔记一同抓回，无单独命令。
 
 运行时编排（时间源/adapter/归档软链）走 runtime 模块，与 run_research 共享；
 monkeypatch pin（如 "src.pipelines.runtime.now_iso"）对全部命令一处生效。
@@ -16,11 +16,11 @@ import typer
 import yaml
 
 import src.pipelines.run_research as run_research
-from src.core.exporter import export_all, export_comments, export_watch_side
+from src.core.exporter import export_all, export_watch_side
 from src.core.note_selector import select_typical_notes
 from src.models import AccountRank
 from src.pipelines import runtime
-from src.pipelines.artifacts import load_ranks_csv, load_typical_csv, resolve_latest_run_dir
+from src.pipelines.artifacts import load_ranks_csv, resolve_latest_run_dir
 from src.pipelines.config import RunConfig
 from web.bundle import build_bundle
 from web.report import build_report
@@ -51,15 +51,15 @@ def _latest_run_dir_or_exit(config: RunConfig) -> Path:
 
 @app.command()
 def research(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
-    """全流程（search + track + comments 组合，与旧入口等价）。"""
+    """全流程（search + track 组合；评论随 track 的 creator 笔记抓回）。"""
     _echo_paths(run_research.run_research(config, verbose=verbose))
 
 
 @app.command()
 def search(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
     """广角：关键词搜索 → 聚合打分 → 选典型 → 导出搜索侧文件（不采评论，建新运行目录）。"""
-    cfg, collected_at, adapter = runtime.prepare(config, verbose=verbose)
-    notes, accounts, ranks = run_research._search_stage(cfg, adapter, collected_at)
+    cfg, collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
+    notes, accounts, ranks = run_research._search_stage(cfg, adapter, collected_at, store)
 
     typical = select_typical_notes(
         notes,
@@ -140,7 +140,7 @@ def track(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
     独立可跑：紧接 search 时补全写回同一目录；否则自建新目录逐次归档
     （auto 名额沿用上次搜索榜单，缺则仅 manual）。
     """
-    cfg, collected_at, adapter = runtime.prepare(config, verbose=verbose)
+    cfg, collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
 
     if cfg.watchlist is None:
         logger.warning("配置无 watchlist 段，track 无事可做")
@@ -148,7 +148,7 @@ def track(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
 
     run_dir, ranks = _resolve_track_target(cfg, collected_at)
 
-    artifacts = run_research._sync_stage(cfg, adapter, collected_at, ranks)
+    artifacts = run_research._sync_stage(cfg, adapter, collected_at, ranks, store)
     paths = export_watch_side(
         run_dir,
         watchlist=artifacts.watchlist,
@@ -160,32 +160,7 @@ def track(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
     _echo_paths(paths)
 
 
-@app.command()
-def comments(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
-    """深读：对最近一跑的典型笔记补采评论，写回该目录（comments.csv + 重写 report_input.md）。"""
-    cfg, collected_at, adapter = runtime.prepare(config, verbose=verbose)
-    run_dir = _latest_run_dir_or_exit(cfg)
-
-    try:
-        typical = load_typical_csv(run_dir / "typical_notes.csv")
-        ranks = load_ranks_csv(run_dir / "account_rank.csv")
-    except ValueError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(1) from e
-    if not typical:
-        typer.echo(f"{run_dir} 无典型笔记可补采——请先跑 search 或 research", err=True)
-        raise typer.Exit(1)
-
-    collected = run_research._comments_stage(cfg, adapter, typical, collected_at)
-    paths = export_comments(
-        run_dir,
-        ranks=ranks,
-        typical_notes=typical,
-        comments=collected,
-        comment_top_k=cfg.comments.report_top_k,
-    )
-    logger.info("✓ 补全写回 %d 个文件 → %s", len(paths), run_dir)
-    _echo_paths(paths)
+# 全量采集后评论随 creator 笔记一同抓回（见 track/research），不再有单独 comments 命令。
 
 
 @app.command()

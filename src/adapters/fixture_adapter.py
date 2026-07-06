@@ -129,6 +129,14 @@ class FixtureAdapter(ResearchAdapter):
             accounts.append(account)
 
         profiles = self._read_creator_profiles(wanted, collected_at)
+        # 全量采集：评论随 creator 笔记一同带回（真实 adapter 同会话抓，夹具从 comments_path 读）
+        comments = []
+        if self._comments_path is not None:
+            try:
+                ctext = self._comments_path.read_text(encoding="utf-8")
+                comments = parse_comments_jsonl_lines(ctext.splitlines(), collected_at=collected_at)
+            except OSError:
+                comments = []
         return FetchResult(
             provider=self.provider_name,
             operation="creator_notes",
@@ -136,6 +144,7 @@ class FixtureAdapter(ResearchAdapter):
             notes=notes,
             accounts=accounts,
             profiles=profiles,
+            comments=comments,
             raw_path=str(self._creator_path),
             raw_text=text,
         )
@@ -152,3 +161,58 @@ class FixtureAdapter(ResearchAdapter):
             text.splitlines(), collected_at=collected_at
         )
         return [p for p in all_profiles if p.account_id in wanted]
+
+    # ---- 两段式增量（离线替身）：从 creator 夹具派生卡片 + 按 id 出详情 ----
+    def _creator_notes_for(self, account_ids: list[str], collected_at: str):
+        if self._creator_path is None:
+            return [], []
+        text = self._creator_path.read_text(encoding="utf-8")
+        notes, accounts = parse_jsonl_lines(
+            text.splitlines(),
+            keyword="",
+            collected_at=collected_at,
+            raw_path=str(self._creator_path),
+        )
+        wanted = set(account_ids)
+        pairs = [(n, a) for n, a in zip(notes, accounts, strict=True) if n.account_id in wanted]
+        return [n for n, _ in pairs], [a for _, a in pairs]
+
+    def list_creator_notes(self, account_ids: list[str], collected_at: str):
+        """列表模式替身：从 creator 夹具派生卡片（note_id + 计数）+ 档案。"""
+        notes, _ = self._creator_notes_for(account_ids, collected_at)
+        cards = [
+            {
+                "note_id": n.note_id,
+                "xsec_token": "",
+                "xsec_source": "pc_feed",
+                "user_id": n.account_id,
+                "liked_count": n.like_count,
+            }
+            for n in notes
+        ]
+        profiles = self._read_creator_profiles(set(account_ids), collected_at)
+        return cards, profiles
+
+    def fetch_note_details(self, cards: list[dict], collected_at: str) -> FetchResult:
+        """详情模式替身：对给定卡片 id 出笔记全字段 + 评论（从 comments 夹具）。"""
+        want = {c.get("note_id") for c in cards}
+        acct_ids = list({c.get("user_id") for c in cards if c.get("user_id")})
+        notes, accounts = self._creator_notes_for(acct_ids, collected_at)
+        notes = [n for n in notes if n.note_id in want]
+        comments = []
+        if self._comments_path is not None:
+            try:
+                comments = parse_comments_jsonl_lines(
+                    self._comments_path.read_text(encoding="utf-8").splitlines(),
+                    collected_at=collected_at,
+                )
+            except OSError:
+                comments = []
+        return FetchResult(
+            provider=self.provider_name,
+            operation="note_details",
+            collected_at=collected_at,
+            notes=notes,
+            accounts=[a for a in accounts if a.account_id in acct_ids],
+            comments=comments,
+        )

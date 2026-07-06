@@ -14,7 +14,9 @@ import yaml
 
 from src.adapters.fixture_adapter import FixtureAdapter
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
+from src.adapters.mysql_store import MySQLStore
 from src.core.ports import ResearchAdapter
+from src.core.store import Store
 from src.pipelines.config import RunConfig
 from src.pipelines.logging_setup import _compact_run_id as compact_run_id
 from src.pipelines.logging_setup import configure_logging
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "now_iso",
     "build_adapter",
+    "build_store",
     "resolve_config_refs",
     "update_latest_link",
     "compact_run_id",
@@ -34,6 +37,13 @@ __all__ = [
 
 def now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+def build_store(config: RunConfig) -> Store | None:
+    """组装根建 store：store.enabled=false → None（旧版全量行为）；否则连本机 MySQL。"""
+    if not config.store.enabled:
+        return None
+    return MySQLStore(config.store.database)
 
 
 def build_adapter(config: RunConfig) -> ResearchAdapter:
@@ -56,6 +66,8 @@ def build_adapter(config: RunConfig) -> ResearchAdapter:
                 max_concurrency=mc.max_concurrency,
                 sleep_sec=mc.sleep_sec,
                 timeout=mc.timeout,
+                download_images=mc.download_images,
+                media_dir=mc.media_dir,
             )
         # creator_fixture_path is fixture-provider only; MediaCrawler mode must use
         # MediaCrawler creator output. The unavailable-dir fallback keeps that boundary explicit.
@@ -120,11 +132,14 @@ def update_latest_link(base: Path, run_dir: Path) -> None:
         logger.warning("latest 软链更新失败：%s", e)
 
 
-def prepare(config_path: str, *, verbose: bool) -> tuple[RunConfig, str, ResearchAdapter]:
-    """各命令共用前奏：读配置（含资产引用）→ 建模 → 时间戳 → adapter → 日志。
+def prepare(
+    config_path: str, *, verbose: bool
+) -> tuple[RunConfig, str, ResearchAdapter, Store | None]:
+    """各命令共用前奏：读配置（含资产引用）→ 建模 → 时间戳 → adapter → store → 日志。
 
     资产引用双源冲突等 → 打印后 typer.Exit(1)。now_iso/build_adapter 以模块内裸名调用，
     monkeypatch pin `src.pipelines.runtime.now_iso` 等对本函数生效（cli 与 run_research 同源）。
+    store 为 None 时管线走旧版全量行为（见 build_store）。
     """
     raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
     try:
@@ -135,10 +150,11 @@ def prepare(config_path: str, *, verbose: bool) -> tuple[RunConfig, str, Researc
     config = RunConfig.model_validate(raw)
     collected_at = now_iso()
     adapter = build_adapter(config)
+    store = build_store(config)
     configure_logging(
         config.logging.model_dump(),
         verbose=verbose,
         run_id=collected_at,
         provider=adapter.provider_name,
     )
-    return config, collected_at, adapter
+    return config, collected_at, adapter, store

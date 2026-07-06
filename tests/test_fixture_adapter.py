@@ -43,7 +43,10 @@ def test_fetch_comments_reads_optional_fixture():
     assert len(r.comments) >= 1
     assert r.comments[0].body.startswith("这个角度")
     assert r.comments[0].like_count == 12000
-    assert set(r.comments[0].model_dump()) == {"body", "note_id", "like_count", "collected_at"}
+    # 全量采集：评论现在保留身份/楼层/配图等（四项裁剪红线已由用户明确扩范围推翻）
+    keys = set(r.comments[0].model_dump())
+    assert {"body", "note_id", "like_count", "collected_at"} <= keys
+    assert {"author_id", "ip_location", "parent_comment_id", "pictures"} <= keys
 
 
 def test_fetch_comments_limit_caps_comments():

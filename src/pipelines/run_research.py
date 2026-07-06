@@ -19,6 +19,7 @@ from src.core.exporter import export_all
 from src.core.keyword_expander import expand_keywords
 from src.core.note_selector import select_typical_notes
 from src.core.ports import ResearchAdapter
+from src.core.store import Store
 from src.core.time_window import filter_notes
 from src.core.watchlist import build_watchlist
 from src.models import (
@@ -28,7 +29,6 @@ from src.models import (
     CreatorProfile,
     FetchResult,
     Note,
-    TypicalNote,
     WatchAccount,
 )
 from src.pipelines import progress, runtime
@@ -119,26 +119,40 @@ class SyncArtifacts(BaseModel):
     creator_notes: list[Note] | None = None
     account_profiles: list[AccountRank] | None = None
     creator_profiles: list[CreatorProfile] | None = None
+    comments: list[Comment] | None = None  # 全量：creator 同会话带回的评论
 
 
 def _search_stage(
-    config: RunConfig, adapter: ResearchAdapter, collected_at: str
+    config: RunConfig, adapter: ResearchAdapter, collected_at: str, store: Store | None = None
 ) -> tuple[list[Note], list[Account], list[AccountRank]]:
-    """搜索段：关键词扩展 → 搜索采集 → 时间窗过滤 → 聚合去重 → 账号打分。"""
+    """搜索段：关键词扩展 → 搜索采集 → 时间窗过滤 → 聚合去重 → 账号打分。
+
+    store 非空时把聚合后的笔记/账号 upsert 进库（新增/刷新，幂等）。"""
     keywords = expand_keywords(config.keywords, config.synonyms)
     logger.info("关键词扩展：%d 个（%s）", len(keywords), " / ".join(keywords))
     pages = config.search.pages
     limit = config.search.limit
     window_days = config.search.window_days
 
+    # 少量多次：关键词分批成多个会话（batch<=0 = 全部一会话，旧行为）
+    batch = config.search.batch_size
+    kw_chunks = (
+        [keywords]
+        if batch <= 0
+        else [keywords[i : i + batch] for i in range(0, len(keywords), batch)]
+    )
+
     results = []
     search_many = getattr(adapter, "search_many", None)
     if callable(search_many):
         notes_per_keyword = max(limit or 20, 1) * max(pages, 1)
         t0 = perf_counter()
+        if len(kw_chunks) > 1:
+            logger.info("少量多次：%d 关键词分 %d 批会话", len(keywords), len(kw_chunks))
         with progress.search_progress(len(keywords), notes_per_keyword) as on_progress:
             with _attach_progress(adapter, on_progress):
-                results = search_many(keywords, pages, limit, collected_at)
+                for chunk in kw_chunks:
+                    results.extend(search_many(chunk, pages, limit, collected_at))
         dt = perf_counter() - t0
         for result in results:
             log_result(logger, result)
@@ -149,7 +163,7 @@ def _search_stage(
                 notes_per_keyword,
                 len(result.accounts),
             )
-        logger.info("搜索单会话：%d 个关键词 · %.1fs", len(keywords), dt)
+        logger.info("搜索：%d 个关键词 · %d 批 · %.1fs", len(keywords), len(kw_chunks), dt)
     else:
         with progress.stage_bar("搜索", total=len(keywords) * pages) as bar:
             for kw in keywords:
@@ -173,15 +187,60 @@ def _search_stage(
     results = _apply_time_window(results, window_days, collected_at)
     notes, accounts = aggregate(results)
     logger.info("聚合去重：笔记 %d · 账号 %d", len(notes), len(accounts))
+    if store is not None:
+        store.upsert_accounts(accounts)
+        store.upsert_notes(notes)
+        logger.info("入库：账号 %d · 笔记 %d（新增/刷新）", len(accounts), len(notes))
     ranks = rank_accounts(accounts, notes, config.ranking.weights)
     logger.info("账号打分：%d 个", len(ranks))
     return notes, accounts, ranks
 
 
+def _creator_two_phase(
+    adapter: ResearchAdapter, account_ids: list[str], collected_at: str, store: Store
+) -> tuple[list[Note], list[CreatorProfile], list[Comment]]:
+    """两段式增量：列表模式拿卡片 → 库里 diff → 只对新帖抓详情+评论+图，全部入库。
+
+    稳态某账号没发新帖 → 详情/评论/图请求全省，只花列表那一个请求。
+    """
+    with progress.spinner(f"列表模式：{len(account_ids)} 个账号主页…"):
+        cards, profiles = adapter.list_creator_notes(account_ids, collected_at)
+    known = store.known_note_ids()
+    new_cards = [c for c in cards if c.get("note_id") and c["note_id"] not in known]
+    logger.info("两段式：列表 %d 帖 · 新帖 %d（老帖跳过详情）", len(cards), len(new_cards))
+
+    notes: list[Note] = []
+    comments: list[Comment] = []
+    accounts: list[Account] = []
+    if new_cards:
+        # 详情段是慢的部分（每篇 正文+评论+图），adapter 逐篇 emit 事件推进度
+        with progress.detail_progress(len(new_cards)) as on_prog:
+            with _attach_progress(adapter, on_prog):
+                result = adapter.fetch_note_details(new_cards, collected_at)
+        log_result(logger, result)
+        notes, comments, accounts = result.notes, result.comments, result.accounts
+        logger.info("两段式：新帖详情 %d · 评论 %d", len(notes), len(comments))
+
+    if store is not None:
+        store.upsert_accounts(accounts)
+        store.upsert_profiles(profiles)
+        store.upsert_notes(notes)
+        store.upsert_comments(comments)
+        # 新帖详情连评论一起抓的 → 标记评论已抓（增量据此跳过）
+        store.mark_comments_fetched([n.note_id for n in notes], collected_at)
+    return notes, profiles, comments
+
+
 def _sync_stage(
-    config: RunConfig, adapter: ResearchAdapter, collected_at: str, ranks: list[AccountRank]
+    config: RunConfig,
+    adapter: ResearchAdapter,
+    collected_at: str,
+    ranks: list[AccountRank],
+    store: Store | None = None,
 ) -> SyncArtifacts:
-    """watchlist 同步段：合成 → creator 拉取 → 专业度分项。"""
+    """watchlist 同步段：合成 → creator 拉取 → 专业度分项。
+
+    store 非空时把 creator 笔记/档案 upsert 进库，并标记 watchlist 账号 creator_fetched_at。"""
     watchlist_cfg = config.watchlist
     if watchlist_cfg is None:
         return SyncArtifacts()
@@ -218,24 +277,57 @@ def _sync_stage(
         len(watchlist),
     )
 
+    # 少量多次：只抓本次到期的一批（最久未抓优先），跨次轮转 watchlist 避免一次拉太多。
+    # 需 store（轮转状态在 creator_fetched_at 列）；self 账号永不被批次截掉（自己的号常看）。
+    batch_size = config.creator.batch_size
+    if store is not None and batch_size > 0 and watchlist:
+        due = set(
+            store.accounts_due_for_creator(
+                [wa.account_id for wa in watchlist],
+                batch_size,
+                config.creator.refresh_days,
+                collected_at,
+            )
+        )
+        kept = [wa for wa in watchlist if wa.account_id in due or wa.source == "self"]
+        logger.info("少量多次：本批抓 %d/%d 账号（最久未抓优先）", len(kept), len(watchlist))
+        watchlist = kept
+
     creator_notes: list[Note] = []
     creator_profiles: list[CreatorProfile] = []
-    if watchlist:
+    creator_comments: list[Comment] = []
+    account_ids = [wa.account_id for wa in watchlist]
+    # 两段式增量：有库 + adapter 支持列表模式 → 列表→diff→只抓新帖详情（帖子尺度省请求）
+    if watchlist and store is not None and hasattr(adapter, "list_creator_notes"):
+        creator_notes, creator_profiles, creator_comments = _creator_two_phase(
+            adapter, account_ids, collected_at, store
+        )
+        watchlist = _backfill_watchlist_nicknames(
+            watchlist,
+            [
+                Account(
+                    account_id=p.account_id,
+                    nickname=p.nickname,
+                    source_keywords=[],
+                    note_count=0,
+                    first_seen_at=collected_at,
+                    last_seen_at=collected_at,
+                )
+                for p in creator_profiles
+            ],
+        )
+        store.mark_creator_fetched(account_ids, collected_at)
+    elif watchlist:
+        # 老路径：单会话整批全量抓（无库 / 非 MediaCrawler / adapter 不支持列表）
         notes_per_account = config.creator.notes_per_account
-        # 进度显示：adapter 支持进度事件（有 on_progress 属性，如 MediaCrawler）才注入
-        # 回调；非 TTY 时 creator_progress 直接给 None，adapter 零回调开销
         names = {wa.account_id: wa.nickname or wa.account_id for wa in watchlist}
         try:
             with progress.creator_progress(
-                len(watchlist),
-                names,
-                notes_per_creator=notes_per_account,
+                len(watchlist), names, notes_per_creator=notes_per_account
             ) as on_progress:
                 with _attach_progress(adapter, on_progress):
                     creator_result = adapter.fetch_creator_notes(
-                        [account.account_id for account in watchlist],
-                        notes_per_account,
-                        collected_at,
+                        account_ids, notes_per_account, collected_at
                     )
         except NotImplementedError:
             logger.warning("创作者笔记采集：跳过（数据源不支持）")
@@ -243,9 +335,21 @@ def _sync_stage(
             log_result(logger, creator_result)
             creator_notes = creator_result.notes
             creator_profiles = creator_result.profiles
+            creator_comments = creator_result.comments
             watchlist = _backfill_watchlist_nicknames(watchlist, creator_result.accounts)
-            logger.info("创作者笔记：采到 %d 条", len(creator_notes))
-            logger.info("创作者档案：%d 份", len(creator_profiles))
+            logger.info(
+                "创作者笔记：采到 %d · 档案 %d · 随帖评论 %d",
+                len(creator_notes),
+                len(creator_profiles),
+                len(creator_comments),
+            )
+            if store is not None:
+                store.upsert_accounts(creator_result.accounts)
+                store.upsert_notes(creator_notes)
+                store.upsert_profiles(creator_profiles)
+                store.upsert_comments(creator_comments)
+                store.mark_creator_fetched(account_ids, collected_at)
+                store.mark_comments_fetched([n.note_id for n in creator_notes], collected_at)
     else:
         logger.info("watchlist：为空，跳过创作者笔记采集")
 
@@ -264,51 +368,15 @@ def _sync_stage(
         creator_notes=creator_notes,
         account_profiles=account_profiles,
         creator_profiles=creator_profiles,
+        comments=creator_comments,
     )
 
 
-def _comments_stage(
-    config: RunConfig, adapter: ResearchAdapter, typical: list[TypicalNote], collected_at: str
-) -> list[Comment]:
-    """评论段：对典型笔记批量采一级评论（可关）。"""
-    comments_cfg = config.comments
-    comments: list[Comment] = []
-    if comments_cfg.enabled:
-        # 批量上限：典型笔记随账号数线性膨胀（实测 119 条单命令必超时），按分数截前 N
-        max_notes = comments_cfg.max_notes
-        targets = typical
-        if max_notes and len(typical) > max_notes:
-            targets = sorted(typical, key=lambda t: t.note_score, reverse=True)[:max_notes]
-            logger.info(
-                "评论：典型笔记 %d 条超上限，按分数取前 %d 条（comments.max_notes）",
-                len(typical),
-                max_notes,
-            )
-        # 进行时提示：单个子进程批量采，adapter 会按篇往日志写「N/总 完成」进度
-        logger.info("评论：开始采集 %d 条典型笔记（单并发批量，逐篇进度见日志）", len(targets))
-        try:
-            with progress.spinner(f"评论采集：{len(targets)} 条典型笔记…"):
-                comment_result = adapter.fetch_comments(targets, comments_cfg.limit, collected_at)
-        except NotImplementedError:
-            comment_result = None
-            logger.info("评论：跳过（数据源不支持）")
-        if comment_result and comment_result.ok:
-            log_result(logger, comment_result)
-            comments = comment_result.comments
-            logger.info("评论：采到 %d 条", len(comments))
-        elif comment_result:
-            log_result(logger, comment_result)
-            logger.info("评论：采到 0 条")
-    else:
-        logger.info("评论：跳过（未启用）")
-    return comments
-
-
 def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
-    config, collected_at, adapter = runtime.prepare(config_path, verbose=verbose)
+    config, collected_at, adapter, store = runtime.prepare(config_path, verbose=verbose)
 
-    notes, accounts, ranks = _search_stage(config, adapter, collected_at)
-    sync = _sync_stage(config, adapter, collected_at, ranks)
+    notes, accounts, ranks = _search_stage(config, adapter, collected_at, store)
+    sync = _sync_stage(config, adapter, collected_at, ranks, store)
 
     typical = select_typical_notes(
         notes,
@@ -318,7 +386,8 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     )
     logger.info("选出典型笔记：%d 条", len(typical))
 
-    comments = _comments_stage(config, adapter, typical, collected_at)
+    # 全量采集：评论随 creator 笔记一同抓回（见 _sync_stage），不再单独跑评论段
+    comments = sync.comments or []
 
     # 按运行归档：每次导出独立时间戳目录（与 run 日志同一时间戳，可互相对上），不覆盖历史
     out_base = Path(config.export.out_dir)

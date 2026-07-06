@@ -310,6 +310,81 @@ def test_build_creator_command_joins_ids_single_session(tmp_path):
     assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "7"
     assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"  # 单并发不变
     assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "2.0"
+    # 全量采集：评论随会话抓 + 默认下载原图
+    assert cmd[cmd.index("--get_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_images") + 1] == "yes"
+
+
+def test_build_creator_command_can_disable_image_download(tmp_path):
+    cmd = _adapter(tmp_path, download_images=False)._build_creator_command(
+        ["601d0481000000000101cc46"], 5, tmp_path / "creator"
+    )
+    assert "--get_images" not in cmd
+
+
+def test_build_list_command_is_list_only(tmp_path):
+    cmd = _adapter(tmp_path)._build_list_command(["a1", "a2"], tmp_path)
+    assert cmd[cmd.index("--type") + 1] == "creator"
+    assert cmd[cmd.index("--creator_id") + 1] == "a1,a2"
+    assert cmd[cmd.index("--list_only") + 1] == "yes"
+    # 列表模式不抓评论/图（那是详情段的事）
+    assert "--get_comment" not in cmd
+    assert "--get_images" not in cmd
+
+
+def test_build_detail_command_full_capture(tmp_path):
+    cmd = _adapter(tmp_path)._build_detail_command(["https://x/n1"], tmp_path)
+    assert cmd[cmd.index("--type") + 1] == "detail"
+    assert cmd[cmd.index("--get_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_images") + 1] == "yes"
+
+
+def test_card_note_url_builds_explore_url():
+    url = MediaCrawlerAdapter._card_note_url(
+        {"note_id": "n1", "xsec_token": "tok", "xsec_source": "pc_feed"}
+    )
+    assert "explore/n1" in url and "xsec_token=tok" in url and "xsec_source=pc_feed" in url
+
+
+def test_promote_images_copies_raw_to_media(tmp_path):
+    """MC 下到 raw 的图复制到持久 media 库，image_paths 存 media 绝对路径；没图保持 []。"""
+    from src.models import Note
+
+    def _note(nid):
+        return Note(
+            note_id=nid,
+            account_id="u",
+            title="t",
+            body="b",
+            tags=[],
+            url="",
+            like_count=0,
+            collect_count=0,
+            comment_count=0,
+            published_at="",
+            collected_at="2026",
+            source_keywords=[],
+            raw_path="",
+        )
+
+    save = tmp_path / "raw" / "creator"
+    img_dir = save / "xhs" / "images" / "n1"
+    img_dir.mkdir(parents=True)
+    (img_dir / "0.jpg").write_bytes(b"x")
+    (img_dir / "1.jpg").write_bytes(b"y")
+
+    media = tmp_path / "media"
+    notes = [_note("n1"), _note("n2")]
+    _adapter(tmp_path, media_dir=str(media))._promote_images(notes, save)
+
+    # image_paths 指向 media（不是 raw）、绝对、文件真复制过去了
+    assert [Path(p).name for p in notes[0].image_paths] == ["0.jpg", "1.jpg"]
+    assert all(Path(p).is_absolute() for p in notes[0].image_paths)
+    assert all(str(media.resolve()) in p for p in notes[0].image_paths)
+    assert (media / "xhs" / "n1" / "0.jpg").read_bytes() == b"x"
+    assert notes[1].image_paths == []
 
 
 def test_fetch_creator_notes_single_session_reads_combined_jsonl(tmp_path, monkeypatch):
@@ -762,6 +837,38 @@ def test_creator_progress_events_from_mc_output(tmp_path, monkeypatch):
         {"kind": "creator_start", "index": 2, "user_id": "bbb"},
         {"kind": "note", "count": 3},
         {"kind": "done"},
+    ]
+
+
+def test_detail_progress_events_two_stages(tmp_path, monkeypatch):
+    """detail 会话：正文 Finish 行 → note 事件；评论限速行 → comments 事件。"""
+    a = _adapter(tmp_path)
+    events = []
+    a.on_progress = events.append
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        assert on_line is not None
+        for line in [
+            "[get_note_detail_async_task] Finish get note detail, note_id: n1\n",
+            "[get_note_detail_async_task] Finish get note detail, note_id: n2\n",
+            "some unrelated log line\n",
+            "[XiaoHongShuCrawler.get_comments] Sleeping for 1.0 seconds "
+            "after fetching comments for note n1\n",
+            "[XiaoHongShuCrawler.get_comments] Sleeping for 1.0 seconds "
+            "after fetching comments for note n2\n",
+        ]:
+            on_line(line)
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    cards = [{"note_id": "n1", "xsec_token": "t1"}, {"note_id": "n2", "xsec_token": "t2"}]
+    a.fetch_note_details(cards, "2026-07-06T00:00:00Z")
+
+    assert events == [
+        {"kind": "note", "count": 1},
+        {"kind": "note", "count": 2},
+        {"kind": "comments", "count": 1},
+        {"kind": "comments", "count": 2},
     ]
 
 

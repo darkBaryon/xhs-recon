@@ -328,8 +328,13 @@ def test_pipeline_account_profile_recent_count_is_window_filtered(tmp_path, monk
 
 
 def test_pipeline_end_to_end_with_comments(tmp_path, monkeypatch):
+    """全量采集：评论随 creator 抓回并导出；库/模型含身份，但导出文件不泄身份（红线仍守）。"""
     monkeypatch.setattr("src.pipelines.runtime.now_iso", lambda: "2026")
     cfg = _cfg(tmp_path)
+    # 评论现在随 creator 一同抓回 → 需 watchlist + creator 夹具
+    cfg["watchlist"] = {"auto_top_n": 0, "manual": ["601d0481000000000101cc46"], "max_total": 5}
+    cfg["creator"] = {"notes_per_account": 3}
+    cfg["creator_fixture_path"] = "tests/fixtures/creator_contents_sample.jsonl"
     cfg["comments"] = {
         "enabled": True,
         "limit": 10,
@@ -341,22 +346,17 @@ def test_pipeline_end_to_end_with_comments(tmp_path, monkeypatch):
 
     paths = run_research(str(cfg_path))
 
-    assert set(paths) == {
-        "accounts",
-        "notes",
-        "account_rank",
-        "typical_notes",
-        "comments",
-        "report_input",
-    }
+    assert {"accounts", "notes", "comments", "report_input"} <= set(paths)
     with open(paths["comments"], encoding="utf-8") as f:
         rows = list(csv.reader(f))
+    # 导出仍是四列视图（身份留库不进 CSV）
     assert rows[0] == ["body", "note_id", "like_count", "collected_at"]
     assert rows[1][0].startswith("这个角度")
     assert rows[1][2] == "12000"
 
     md = Path(paths["report_input"]).read_text(encoding="utf-8")
     assert "评论 12000赞：这个角度很有帮助" in md
+    # 导出文件不泄评论者身份（即便模型/库现在保留了这些字段）
     run_dir = Path(paths["report_input"]).parent
     exported_text = "\n".join(
         p.read_text(encoding="utf-8") for p in run_dir.iterdir() if p.is_file()

@@ -8,12 +8,14 @@ mediacrawler:
   timeout: 0                               # 0=不限时（无限等，慎用）；>0 为各阶段超时下限、按工作量放大
   max_concurrency: 1                       # 保持单页面/单详情并发，降低风控概率
   sleep_sec: 1.0                           # MC 默认 2s；真实采集耗时主要卡在详情 sleep
+  download_images: true                    # creator 会话下原图到本地（URL 几天即 403，唯下载可永久看）
 keywords_file: configs/留学辅导/keywords.yaml     # 词表资产外置（与 inline keywords/synonyms 互斥）
 search:
   pages: 1
   limit: 12
   sort: time_descending
   window_days: 30
+  batch_size: 3                            # 少量多次：关键词分批，每会话最多 3 个（0=全部一会话）
 ranking:
   weights:
     note_count: 10
@@ -27,6 +29,8 @@ watchlist:
   max_total: 30   # 2026-07-03 用户拍板：上限由 10 提至 30（用量口径变更）
 creator:
   notes_per_account: 6
+  batch_size: 5                # 少量多次：每次 track 只抓最久未抓的 5 个账号（0=全抓）
+  refresh_days: 5             # 抓过不满 5 天的账号跳过（≈每账号每周回访一次）；0=纯轮询最旧
 selection:
   top_notes_per_account: 2
   half_life_days: 14
@@ -34,6 +38,7 @@ comments:
   enabled: true
   limit: 10
   report_top_k: 3
+  refresh_days: 0              # 评论随笔记抓，0=只抓从没抓过的（>0 超期重刷）
   max_notes: 30                # 采评论的典型笔记上限（按分数截前 N，防批量超时）
   fixture_path: tests/fixtures/comments.jsonl   # MediaCrawler 不可用降级 fixture 时使用
 logging:
@@ -42,3 +47,6 @@ logging:
   file_enabled: true
 export:
   out_dir: data/exports
+store:
+  enabled: true               # 数据入本机 MySQL 独立库；关掉则退回旧全量行为（per-run 目录）
+  database: xhs_recon

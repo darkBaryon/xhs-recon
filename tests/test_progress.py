@@ -124,6 +124,31 @@ def test_search_progress_tty_translates_events():
     assert "essay 详情 0" in out
 
 
+def test_detail_progress_non_tty_yields_none():
+    buf = io.StringIO()
+    with progress.detail_progress(5, console=_non_tty_console(buf)) as cb:
+        assert cb is None
+    assert buf.getvalue() == ""
+
+
+def test_detail_progress_tty_two_stage_bars():
+    """正文/图 与 评论 各一条：note 事件只推前者，comments 事件只推后者。"""
+    buf = io.StringIO()
+    with progress.detail_progress(3, console=_tty_console(buf)) as cb:
+        assert cb is not None
+        cb({"kind": "note", "count": 1})
+        cb({"kind": "note", "count": 2})
+        cb({"kind": "note", "count": 3})
+        cb({"kind": "comments", "count": 1})
+        # 未知事件类型：忽略不炸
+        cb({"kind": "future_event"})
+    out = buf.getvalue()
+    assert "新帖正文/图" in out
+    assert "3/3" in out
+    assert "新帖评论" in out
+    assert "1/3" in out
+
+
 def test_spinner_tty_shows_status():
     buf = io.StringIO()
     with progress.spinner("评论采集：30 条", console=_tty_console(buf)):

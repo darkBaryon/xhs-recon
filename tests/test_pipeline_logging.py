@@ -38,7 +38,6 @@ def test_run_research_logs_stage_lines_and_keyword(tmp_path, monkeypatch, caplog
     assert "聚合去重：" in text
     assert "账号打分：" in text
     assert "选出典型笔记：" in text
-    assert "评论：采到" in text
     assert "导出" in text
     # 关键词可 grep 性（B2 取舍：keyword 入消息体）
     assert any(r.levelno == logging.INFO and "「留学辅导」" in r.message for r in caplog.records)
@@ -106,12 +105,12 @@ def test_logging_options_do_not_change_export_bytes(tmp_path, monkeypatch):
 
             paths = run_research(str(cfg_path), verbose=verbose)
             actual = {name: Path(path).read_bytes() for name, path in paths.items()}
+            # 无 creator → 评论不流入（评论随 creator 抓回），故无 comments 文件
             assert set(actual) == {
                 "accounts",
                 "notes",
                 "account_rank",
                 "typical_notes",
-                "comments",
                 "report_input",
             }
             if expected is None:
