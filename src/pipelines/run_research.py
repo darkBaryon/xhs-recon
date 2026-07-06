@@ -290,7 +290,12 @@ def _sync_stage(
             )
         )
         kept = [wa for wa in watchlist if wa.account_id in due or wa.source == "self"]
-        logger.info("少量多次：本批抓 %d/%d 账号（最久未抓优先）", len(kept), len(watchlist))
+        logger.info(
+            "少量多次：本批抓 %d/%d 账号（最久未抓优先）：%s",
+            len(kept),
+            len(watchlist),
+            "、".join(wa.nickname or wa.account_id for wa in kept),
+        )
         watchlist = kept
 
     creator_notes: list[Note] = []
