@@ -7,25 +7,33 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="logo">📕 <b>本地小红书</b></div>
-  <input id="search" class="search" type="search" placeholder="搜索笔记（标题 / 正文 / 标签 / 作者）">
-  <select id="sort" class="sort">
-    <option value="date">最新发布</option>
-    <option value="like">最多点赞</option>
-    <option value="comment">最多评论</option>
-    <option value="collect">最多收藏</option>
-  </select>
-  <div id="stats" class="stats"></div>
-</header>
-
 <div class="layout">
   <nav class="sidebar">
-    <div id="nav-all" class="nav-item active">🏠 发现</div>
+    <div class="logo-badge">小红书</div>
+    <div id="nav-all" class="nav-item active"><span class="ic">🏠</span> 首页</div>
     <div class="nav-title">账号</div>
     <div id="account-list"></div>
+    <div id="stats" class="stats"></div>
   </nav>
-  <main id="feed" class="feed"></main>
+
+  <main class="main">
+    <div class="search-zone">
+      <div class="search-pill">
+        <input id="search" type="search" placeholder="搜索笔记（标题 / 正文 / 标签 / 作者）">
+        <button class="search-btn" aria-label="搜索">🔍</button>
+      </div>
+      <div class="channels">
+        <div id="channel-tabs" class="tabs"></div>
+        <select id="sort" class="sort">
+          <option value="date">最新发布</option>
+          <option value="like">最多点赞</option>
+          <option value="comment">最多评论</option>
+          <option value="collect">最多收藏</option>
+        </select>
+      </div>
+    </div>
+    <div id="feed" class="feed"></div>
+  </main>
 </div>
 
 <div id="modal" class="modal hidden">

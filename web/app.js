@@ -41,11 +41,12 @@
   }
 
   /* ── 瀑布流 ── */
-  const state = { q: "", sort: "date", acc: "" };
+  const state = { q: "", sort: "date", acc: "", tag: "" };
 
   function visibleNotes() {
     let notes = DATA.notes;
     if (state.acc) notes = notes.filter((n) => n.aid === state.acc);
+    if (state.tag) notes = notes.filter((n) => n.tags.includes(state.tag));
     if (state.q) {
       const q = state.q.toLowerCase();
       notes = notes.filter((n) =>
@@ -71,8 +72,10 @@
       if (!note.imgs[0]) img.referrerPolicy = "no-referrer";
       img.src = src;
       img.onerror = () => {
+        // CDN 签名过期常见：回落文字封面，同时撤下方标题免得重复
         cover.replaceChildren(el("div", "t", note.title || note.body.slice(0, 60)));
         cover.classList.add("textonly");
+        c.querySelector(".title")?.remove();
       };
       cover.appendChild(img);
       if (note.video) cover.appendChild(el("div", "play", "▶"));
@@ -99,7 +102,30 @@
     const feed = $("#feed");
     feed.replaceChildren(...notes.map(card));
     const nc = DATA.comments.length;
-    $("#stats").textContent = `${notes.length}/${DATA.notes.length} 篇 · ${nc} 评论 · ${DATA.accounts.length} 账号`;
+    $("#stats").textContent =
+      `${notes.length}/${DATA.notes.length} 篇笔记 · ${nc} 条评论 · ${DATA.accounts.length} 个账号`;
+  }
+
+  /* ── 频道 tab：库里最热标签当频道，「推荐」=全部 ── */
+  function renderChannels() {
+    const freq = new Map();
+    for (const n of DATA.notes)
+      for (const t of n.tags) freq.set(t, (freq.get(t) || 0) + 1);
+    const top = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+    const tabs = $("#channel-tabs");
+    const mk = (label, tag) => {
+      const t = el("div", "tab" + (tag === state.tag ? " on" : ""), label);
+      t.onclick = () => {
+        state.tag = tag;
+        [...tabs.children].forEach((e) => e.classList.remove("on"));
+        t.classList.add("on");
+        renderFeed();
+        window.scrollTo(0, 0);
+      };
+      return t;
+    };
+    tabs.appendChild(mk("推荐", ""));
+    for (const [tag] of top) tabs.appendChild(mk(tag, tag));
   }
 
   /* ── 侧栏账号 ── */
@@ -264,6 +290,7 @@
     if (e.key === "ArrowRight") document.querySelector(".gallery .next")?.click();
   });
 
+  renderChannels();
   renderSidebar();
   renderFeed();
 })();

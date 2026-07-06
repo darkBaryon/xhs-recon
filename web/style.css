@@ -1,71 +1,97 @@
-/* 小红书风格本地站。对齐 xiaohongshu.com 探索页的观感：
-   白底、圆角卡片瀑布流、#ff2442 红、笔记详情居中大卡。*/
+/* 小红书风格本地站。对齐 xiaohongshu.com 探索页：左侧图标导航栏、
+   内容区居中大搜索胶囊 + 频道 tab、白底圆角卡片瀑布流、#ff2442 红。*/
 :root {
   --red: #ff2442;
   --ink: #333;
   --muted: #999;
   --faint: #bbb;
   --line: #f0f0f0;
-  --bg: #fff;
+  --pill: #f5f5f5;
   --card-r: 16px;
   --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
           -apple-system, BlinkMacSystemFont, sans-serif;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scrollbar-gutter: stable; }
-body { font-family: var(--sans); color: var(--ink); background: var(--bg); }
+body { font-family: var(--sans); color: var(--ink); background: #fff; }
 img { display: block; }
 
-/* ── 顶栏 ─────────────────────────────── */
-.topbar {
-  position: sticky; top: 0; z-index: 30;
-  display: flex; align-items: center; gap: 16px;
-  height: 64px; padding: 0 24px;
-  background: #fff; border-bottom: 1px solid var(--line);
-}
-.logo { font-size: 18px; white-space: nowrap; }
-.logo b { color: var(--red); }
-.search {
-  flex: 0 1 480px; height: 40px; padding: 0 20px;
-  border: none; border-radius: 20px; outline: none;
-  background: #f5f5f5; font-size: 14px; color: var(--ink);
-}
-.search:focus { background: #efefef; }
-.sort {
-  height: 36px; padding: 0 10px; border: 1px solid var(--line);
-  border-radius: 18px; background: #fff; color: var(--ink);
-  font-size: 13px; outline: none; cursor: pointer;
-}
-.stats { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
-
-/* ── 布局：左侧栏 + 瀑布流 ────────────── */
+/* ── 左侧导航栏 ───────────────────────── */
 .layout { display: flex; }
 .sidebar {
-  position: sticky; top: 64px; align-self: flex-start;
-  width: 220px; flex: none; height: calc(100vh - 64px);
-  overflow-y: auto; padding: 16px 8px 24px 16px;
+  position: sticky; top: 0; align-self: flex-start;
+  width: 220px; flex: none; height: 100vh;
+  overflow-y: auto; padding: 24px 12px 24px 20px;
+  display: flex; flex-direction: column;
+}
+.logo-badge {
+  align-self: flex-start; margin: 0 0 22px 8px;
+  background: var(--red); color: #fff;
+  font-size: 17px; font-weight: 700; letter-spacing: 1px;
+  padding: 7px 14px; border-radius: 10px;
 }
 .nav-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px; border-radius: 24px;
-  font-size: 15px; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-radius: 28px;
+  font-size: 16px; cursor: pointer; user-select: none;
 }
-.nav-item:hover { background: #f5f5f5; }
-.nav-item.active { background: #f5f5f5; font-weight: 600; }
-.nav-title { margin: 18px 14px 6px; font-size: 12px; color: var(--faint); }
-.acct { font-size: 13px; }
+.nav-item .ic { font-size: 18px; }
+.nav-item:hover { background: var(--pill); }
+.nav-item.active { background: var(--pill); font-weight: 600; }
+.nav-title { margin: 20px 16px 6px; font-size: 12px; color: var(--faint); }
+.acct { font-size: 13px; padding: 8px 16px; }
 .acct .ava { width: 24px; height: 24px; border-radius: 50%; flex: none; }
 .acct .nick { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct .n { margin-left: auto; font-size: 11px; color: var(--faint); }
+.sidebar .stats { margin: 18px 16px 0; font-size: 11px; color: var(--faint); line-height: 1.8; }
 
-.feed {
-  flex: 1; padding: 16px 24px 48px;
-  column-width: 226px; column-gap: 16px;
+/* ── 内容区：搜索胶囊 + 频道 tab ──────── */
+.main { flex: 1; min-width: 0; }
+.search-zone {
+  position: sticky; top: 0; z-index: 30;
+  background: #fff; padding: 20px 24px 0;
+}
+.search-pill {
+  display: flex; align-items: center;
+  max-width: 600px; margin: 0 auto;
+  background: var(--pill); border-radius: 999px; padding: 4px 6px 4px 24px;
+}
+.search-pill input {
+  flex: 1; min-width: 0; height: 40px;
+  border: none; outline: none; background: transparent;
+  font-size: 15px; color: var(--ink);
+}
+.search-btn {
+  width: 38px; height: 38px; flex: none; border: none; cursor: pointer;
+  border-radius: 50%; background: #e8e8e8; font-size: 15px;
+}
+.search-btn:hover { background: #ddd; }
+
+.channels {
+  display: flex; align-items: center; gap: 12px;
+  max-width: 960px; margin: 0 auto; padding: 18px 0 12px;
+}
+.tabs { display: flex; gap: 30px; overflow-x: auto; scrollbar-width: none; flex: 1; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  font-size: 16px; color: var(--ink); cursor: pointer; user-select: none;
+  white-space: nowrap; padding-bottom: 8px; border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--red); }
+.tab.on { color: var(--red); font-weight: 600; border-bottom-color: var(--red); }
+.sort {
+  flex: none; height: 32px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 16px;
+  background: #fff; color: var(--muted); font-size: 13px; outline: none; cursor: pointer;
 }
 
-/* ── 瀑布流卡片 ───────────────────────── */
+/* ── 瀑布流 ───────────────────────────── */
+.feed {
+  padding: 8px 24px 48px;
+  column-width: 226px; column-gap: 16px;
+}
 .card {
-  break-inside: avoid; margin-bottom: 16px;
+  break-inside: avoid; margin-bottom: 20px;
   border-radius: var(--card-r); cursor: pointer;
 }
 .card .cover {
@@ -74,10 +100,8 @@ img { display: block; }
 }
 .card .cover img { width: 100%; height: auto; }
 .card .cover .play {
-  position: absolute; top: 8px; right: 8px;
-  width: 28px; height: 28px; border-radius: 50%;
-  background: rgba(0,0,0,.45); color: #fff;
-  display: flex; align-items: center; justify-content: center; font-size: 12px;
+  position: absolute; top: 10px; right: 10px;
+  color: #fff; font-size: 14px; text-shadow: 0 1px 4px rgba(0,0,0,.6);
 }
 /* 无图笔记：标题当封面（渐变底） */
 .card .cover.textonly {
@@ -90,16 +114,16 @@ img { display: block; }
   display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
 }
 .card .title {
-  padding: 8px 4px 4px; font-size: 14px; line-height: 1.4;
+  padding: 10px 4px 4px; font-size: 14px; line-height: 1.4; font-weight: 500;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .card .meta {
   display: flex; align-items: center; gap: 6px;
-  padding: 2px 4px 6px; font-size: 12px; color: var(--muted);
+  padding: 4px 4px 6px; font-size: 12px; color: var(--muted);
 }
 .card .meta .ava { width: 20px; height: 20px; border-radius: 50%; flex: none; }
 .card .meta .nick { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.card .meta .like { flex: none; }
+.card .meta .like { flex: none; color: var(--muted); }
 
 /* 头像兜底：昵称首字彩圆 */
 .ava-fb {
