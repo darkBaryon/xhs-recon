@@ -258,13 +258,18 @@ class MediaCrawlerAdapter(ResearchAdapter):
                 assert p.stdout is not None
                 # 用 readline 而非 `for line in p.stdout`：后者迭代器会 readahead 预读一整块，
                 # 导致行攒着不吐、进度条中途收不到；readline 来一行吐一行，真流式
-                for line in iter(p.stdout.readline, ""):
-                    lines.append(line)
-                    if on_line is not None:
-                        try:
-                            on_line(line)
-                        except Exception:
-                            logger.debug("on_line 回调异常（忽略，继续读）", exc_info=True)
+                try:
+                    for line in iter(p.stdout.readline, ""):
+                        lines.append(line)
+                        if on_line is not None:
+                            try:
+                                on_line(line)
+                            except Exception:
+                                logger.debug("on_line 回调异常（忽略，继续读）", exc_info=True)
+                except (ValueError, OSError):
+                    # Ctrl-C 等中断时主线程的 Popen 上下文先关了 stdout，阻塞中的
+                    # readline 对已关闭文件抛 ValueError——正常收尾，不往终端喷堆栈
+                    pass
 
             reader = threading.Thread(target=_pump, daemon=True)
             reader.start()
