@@ -58,8 +58,8 @@ def research(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
 @app.command()
 def search(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
     """广角：关键词搜索 → 聚合打分 → 选典型 → 导出搜索侧文件（不采评论，建新运行目录）。"""
-    cfg, collected_at, adapter = runtime.prepare(config, verbose=verbose)
-    notes, accounts, ranks = run_research._search_stage(cfg, adapter, collected_at)
+    cfg, collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
+    notes, accounts, ranks = run_research._search_stage(cfg, adapter, collected_at, store)
 
     typical = select_typical_notes(
         notes,
@@ -140,7 +140,7 @@ def track(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
     独立可跑：紧接 search 时补全写回同一目录；否则自建新目录逐次归档
     （auto 名额沿用上次搜索榜单，缺则仅 manual）。
     """
-    cfg, collected_at, adapter = runtime.prepare(config, verbose=verbose)
+    cfg, collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
 
     if cfg.watchlist is None:
         logger.warning("配置无 watchlist 段，track 无事可做")
@@ -148,7 +148,7 @@ def track(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
 
     run_dir, ranks = _resolve_track_target(cfg, collected_at)
 
-    artifacts = run_research._sync_stage(cfg, adapter, collected_at, ranks)
+    artifacts = run_research._sync_stage(cfg, adapter, collected_at, ranks, store)
     paths = export_watch_side(
         run_dir,
         watchlist=artifacts.watchlist,
@@ -163,7 +163,7 @@ def track(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
 @app.command()
 def comments(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
     """深读：对最近一跑的典型笔记补采评论，写回该目录（comments.csv + 重写 report_input.md）。"""
-    cfg, collected_at, adapter = runtime.prepare(config, verbose=verbose)
+    cfg, collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
     run_dir = _latest_run_dir_or_exit(cfg)
 
     try:
@@ -176,7 +176,7 @@ def comments(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
         typer.echo(f"{run_dir} 无典型笔记可补采——请先跑 search 或 research", err=True)
         raise typer.Exit(1)
 
-    collected = run_research._comments_stage(cfg, adapter, typical, collected_at)
+    collected = run_research._comments_stage(cfg, adapter, typical, collected_at, store)
     paths = export_comments(
         run_dir,
         ranks=ranks,

@@ -45,6 +45,8 @@ class CommentsCfg(BaseModel):
     report_top_k: int = 3
     # 采评论的典型笔记上限（按分数截前 N，防批量超时）
     max_notes: int = 30
+    # 增量：距上次抓评论超过 refresh_days 才重抓；<=0 = 只抓从没抓过的（最省请求）
+    refresh_days: int = 0
     fixture_path: str | None = None
 
 
@@ -66,6 +68,13 @@ class LoggingCfg(BaseModel):
 
 class ExportCfg(BaseModel):
     out_dir: str = "data/exports"
+
+
+class StoreCfg(BaseModel):
+    # enabled=False → 不建库，行为与旧版一致（全量、per-run 目录）；真实配置里置 true 开增量
+    enabled: bool = False
+    # 本机 MySQL 的独立库（凭据自 ~/.my.cnf）；与 uni_atlas 的 study_abroad 同服务器异库
+    database: str = "xhs_recon"
 
 
 class RunConfig(BaseModel):
@@ -90,3 +99,4 @@ class RunConfig(BaseModel):
     mediacrawler: MediaCrawlerCfg = MediaCrawlerCfg()
     logging: LoggingCfg = LoggingCfg()
     export: ExportCfg = ExportCfg()
+    store: StoreCfg = StoreCfg()
