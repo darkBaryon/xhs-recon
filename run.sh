@@ -3,6 +3,7 @@
 #   ./run.sh            # 离线 fixture demo（无需登录/浏览器，用 configs/sample.yaml）
 #   ./run.sh search     # 真实·广角：关键词搜索+榜单（关键词分批，进新领域时）
 #   ./run.sh track      # 真实·长焦：watchlist→creator（含评论+原图，账号轮转，日常盯人）
+#   ./run.sh track-all  # 真实·巡逻：自动一批批 track，批间随机休眠 5-10 分钟，抓完收工
 #   ./run.sh real       # 真实·全流程（= research）
 #   ./run.sh browser    # 只启动/检查采集浏览器（专用 profile + CDP 9222）
 #   ./run.sh web        # 把最新一跑渲染成本地静态站并打开（离线，无需采集）
@@ -86,6 +87,11 @@ case "$cmd" in
     acquire_run_lock
     uv run python -m src.pipelines.cli "$cmd" --config "$CONFIG" "$@"
     ;;
+  track-all)
+    ensure_browser
+    acquire_run_lock
+    uv run python -m src.pipelines.cli track --config "$CONFIG" --loop "$@"
+    ;;
   real)
     ensure_browser
     acquire_run_lock
@@ -106,7 +112,7 @@ case "$cmd" in
     exec uv run python -m src.pipelines.cli bundle --config "$CONFIG" "$@"
     ;;
   *)
-    echo "用法: ./run.sh [demo|search|track|real|browser|web|bundle]" >&2
+    echo "用法: ./run.sh [demo|search|track|track-all|real|browser|web|bundle]" >&2
     exit 2
     ;;
 esac

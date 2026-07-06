@@ -235,3 +235,82 @@ def test_cli_track_produces_creator_profiles(tmp_path):
         assert after[name] == before[name], f"{name} 被 sync 改动"
     # 601d... 在 watchlist manual + 档案夹具里 → 有档案行
     assert b"601d0481000000000101cc46" in after["creator_profiles.csv"]
+
+
+def test_cli_track_loop_rotates_until_no_due_accounts(tmp_path, monkeypatch):
+    """--loop：批批推进，满批→休眠继续，空批→自动收工（伪 store/伪 sync 段）。"""
+    from src.models import WatchAccount
+    from src.pipelines.run_research import SyncArtifacts
+
+    out = tmp_path / "out"
+    cfg = _cfg(out)
+    cfg["creator"]["batch_size"] = 1
+    cfg_path = _write_cfg(tmp_path, "c.yaml", cfg)
+
+    monkeypatch.setattr("src.pipelines.runtime.build_store", lambda config: object())
+    batches = [
+        [WatchAccount(account_id="a1", source="manual")],  # 满批（=batch_size）→ 继续
+        [],  # 空批 → 收工
+    ]
+    calls = []
+
+    def fake_sync(cfg_, adapter, collected_at, ranks, store=None):
+        calls.append(store)
+        return SyncArtifacts(watchlist=batches[len(calls) - 1])
+
+    monkeypatch.setattr("src.pipelines.run_research._sync_stage", fake_sync)
+    sleeps = []
+    monkeypatch.setattr("src.pipelines.cli.time.sleep", lambda s: sleeps.append(s))
+
+    result = runner.invoke(
+        app,
+        ["track", "--config", cfg_path, "--loop", "--pause-min", "7", "--pause-max", "7"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 2  # 第二批后停：没有第三批
+    assert sleeps == [7]  # 只在两批之间休眠一次
+
+
+def test_cli_track_loop_stops_early_on_partial_batch(tmp_path, monkeypatch):
+    """--loop：批量不足 batch_size = 到期账号已抓完 → 不再多睡一轮直接收工。"""
+    from src.models import WatchAccount
+    from src.pipelines.run_research import SyncArtifacts
+
+    out = tmp_path / "out"
+    cfg = _cfg(out)
+    cfg["creator"]["batch_size"] = 5
+    cfg_path = _write_cfg(tmp_path, "c.yaml", cfg)
+
+    monkeypatch.setattr("src.pipelines.runtime.build_store", lambda config: object())
+
+    def fake_sync(cfg_, adapter, collected_at, ranks, store=None):
+        # 只回 2 个（< batch_size=5），且 self 不占轮转名额
+        return SyncArtifacts(
+            watchlist=[
+                WatchAccount(account_id="me", source="self"),
+                WatchAccount(account_id="a1", source="manual"),
+                WatchAccount(account_id="a2", source="auto"),
+            ]
+        )
+
+    monkeypatch.setattr("src.pipelines.run_research._sync_stage", fake_sync)
+    sleeps = []
+    monkeypatch.setattr("src.pipelines.cli.time.sleep", lambda s: sleeps.append(s))
+
+    result = runner.invoke(app, ["track", "--config", cfg_path, "--loop"])
+
+    assert result.exit_code == 0, result.output
+    assert sleeps == []  # 尾批直接收工，零休眠
+
+
+def test_cli_track_loop_without_store_runs_once(tmp_path, monkeypatch):
+    """--loop 但 store 未启用：警告并只跑一批（无轮转状态，循环无意义）。"""
+    result_cfg = _write_cfg(tmp_path, "c.yaml", _cfg(tmp_path / "out"))
+    sleeps = []
+    monkeypatch.setattr("src.pipelines.cli.time.sleep", lambda s: sleeps.append(s))
+
+    result = runner.invoke(app, ["track", "--config", result_cfg, "--loop"])
+
+    assert result.exit_code == 0, result.output
+    assert sleeps == []

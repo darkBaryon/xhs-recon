@@ -24,6 +24,7 @@
 ./run.sh            # 离线 fixture demo（无需登录/浏览器，用 configs/sample.yaml）
 ./run.sh search     # 真实·广角：关键词搜索+榜单（关键词分批，进入新领域时）
 ./run.sh track      # 真实·长焦：watchlist→creator（含评论+原图，账号轮转，日常盯人）
+./run.sh track-all  # 真实·巡逻：自动一批批 track，批间随机休眠 5-10 分钟，抓完收工
 ./run.sh real       # 真实·全流程（= research）
 ./run.sh browser    # 只起/查采集浏览器
 ./run.sh web        # 把最新一跑的导出渲染成本地静态站并打开（离线，无需采集）

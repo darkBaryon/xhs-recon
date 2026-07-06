@@ -10,6 +10,8 @@ monkeypatch pin（如 "src.pipelines.runtime.now_iso"）对全部命令一处生
 """
 
 import logging
+import random
+import time
 from pathlib import Path
 
 import typer
@@ -134,30 +136,65 @@ def _resolve_track_target(config: RunConfig, collected_at: str) -> tuple[Path, l
 
 
 @app.command()
-def track(config: str = _CONFIG_OPT, verbose: bool = _VERBOSE_OPT):
+def track(
+    config: str = _CONFIG_OPT,
+    verbose: bool = _VERBOSE_OPT,
+    loop: bool = typer.Option(
+        False, "--loop", help="连续巡逻：一批接一批直到没有到期账号（批间随机休眠）"
+    ),
+    pause_min: int = typer.Option(300, "--pause-min", help="批间休眠下限（秒）"),
+    pause_max: int = typer.Option(600, "--pause-max", help="批间休眠上限（秒）"),
+):
     """长焦盯人：watchlist 合成 → creator 拉取 → 写运行目录。
 
     独立可跑：紧接 search 时补全写回同一目录；否则自建新目录逐次归档
-    （auto 名额沿用上次搜索榜单，缺则仅 manual）。
+    （auto 名额沿用上次搜索榜单，缺则仅 manual）。--loop 时每批一个运行目录，
+    批间随机休眠，直到 watchlist 全部账号都在刷新期内自动收工。
     """
-    cfg, collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
+    batch_no = 0
+    while True:
+        batch_no += 1
+        cfg, collected_at, adapter, store = runtime.prepare(config, verbose=verbose)
 
-    if cfg.watchlist is None:
-        logger.warning("配置无 watchlist 段，track 无事可做")
-        raise typer.Exit(0)
+        if cfg.watchlist is None:
+            logger.warning("配置无 watchlist 段，track 无事可做")
+            raise typer.Exit(0)
 
-    run_dir, ranks = _resolve_track_target(cfg, collected_at)
+        run_dir, ranks = _resolve_track_target(cfg, collected_at)
 
-    artifacts = run_research._sync_stage(cfg, adapter, collected_at, ranks, store)
-    paths = export_watch_side(
-        run_dir,
-        watchlist=artifacts.watchlist,
-        creator_notes=artifacts.creator_notes,
-        account_profiles=artifacts.account_profiles,
-        creator_profiles=artifacts.creator_profiles,
-    )
-    logger.info("✓ 写回 %d 个文件 → %s", len(paths), run_dir)
-    _echo_paths(paths)
+        artifacts = run_research._sync_stage(cfg, adapter, collected_at, ranks, store)
+        paths = export_watch_side(
+            run_dir,
+            watchlist=artifacts.watchlist,
+            creator_notes=artifacts.creator_notes,
+            account_profiles=artifacts.account_profiles,
+            creator_profiles=artifacts.creator_profiles,
+        )
+        logger.info("✓ 写回 %d 个文件 → %s", len(paths), run_dir)
+        _echo_paths(paths)
+
+        if not loop:
+            return
+        batch_size = cfg.creator.batch_size
+        if store is None or batch_size <= 0:
+            logger.warning(
+                "--loop 需要 store.enabled 且 creator.batch_size>0（否则一跑已覆盖全部），结束"
+            )
+            return
+        # 本批实际抓到的非 self 账号（self 每批都跟着抓，不算轮转名额）
+        fetched = [wa for wa in (artifacts.watchlist or []) if wa.source != "self"]
+        if not fetched:
+            logger.info("巡逻结束：第 %d 批已无到期账号（全部在刷新期内）", batch_no)
+            return
+        if len(fetched) < batch_size:
+            # accounts_due 最多返回 batch_size 个，不足说明到期账号已抓完
+            logger.info("巡逻结束：第 %d 批收尾 %d 个账号，全部抓完", batch_no, len(fetched))
+            return
+        pause = random.randint(max(pause_min, 0), max(pause_max, pause_min, 0))
+        logger.info(
+            "第 %d 批完成（%d 账号），休眠 %d 秒后继续下一批", batch_no, len(fetched), pause
+        )
+        time.sleep(pause)
 
 
 # 全量采集后评论随 creator 笔记一同抓回（见 track/research），不再有单独 comments 命令。
