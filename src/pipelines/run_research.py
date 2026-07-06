@@ -196,6 +196,37 @@ def _search_stage(
     return notes, accounts, ranks
 
 
+def _creator_two_phase(
+    adapter: ResearchAdapter, account_ids: list[str], collected_at: str, store: Store
+) -> tuple[list[Note], list[CreatorProfile], list[Comment]]:
+    """两段式增量：列表模式拿卡片 → 库里 diff → 只对新帖抓详情+评论+图，全部入库。
+
+    稳态某账号没发新帖 → 详情/评论/图请求全省，只花列表那一个请求。
+    """
+    cards, profiles = adapter.list_creator_notes(account_ids, collected_at)
+    known = store.known_note_ids()
+    new_cards = [c for c in cards if c.get("note_id") and c["note_id"] not in known]
+    logger.info("两段式：列表 %d 帖 · 新帖 %d（老帖跳过详情）", len(cards), len(new_cards))
+
+    notes: list[Note] = []
+    comments: list[Comment] = []
+    accounts: list[Account] = []
+    if new_cards:
+        result = adapter.fetch_note_details(new_cards, collected_at)
+        log_result(logger, result)
+        notes, comments, accounts = result.notes, result.comments, result.accounts
+        logger.info("两段式：新帖详情 %d · 评论 %d", len(notes), len(comments))
+
+    if store is not None:
+        store.upsert_accounts(accounts)
+        store.upsert_profiles(profiles)
+        store.upsert_notes(notes)
+        store.upsert_comments(comments)
+        # 新帖详情连评论一起抓的 → 标记评论已抓（增量据此跳过）
+        store.mark_comments_fetched([n.note_id for n in notes], collected_at)
+    return notes, profiles, comments
+
+
 def _sync_stage(
     config: RunConfig,
     adapter: ResearchAdapter,
@@ -261,22 +292,38 @@ def _sync_stage(
     creator_notes: list[Note] = []
     creator_profiles: list[CreatorProfile] = []
     creator_comments: list[Comment] = []
-    if watchlist:
+    account_ids = [wa.account_id for wa in watchlist]
+    # 两段式增量：有库 + adapter 支持列表模式 → 列表→diff→只抓新帖详情（帖子尺度省请求）
+    if watchlist and store is not None and hasattr(adapter, "list_creator_notes"):
+        creator_notes, creator_profiles, creator_comments = _creator_two_phase(
+            adapter, account_ids, collected_at, store
+        )
+        watchlist = _backfill_watchlist_nicknames(
+            watchlist,
+            [
+                Account(
+                    account_id=p.account_id,
+                    nickname=p.nickname,
+                    source_keywords=[],
+                    note_count=0,
+                    first_seen_at=collected_at,
+                    last_seen_at=collected_at,
+                )
+                for p in creator_profiles
+            ],
+        )
+        store.mark_creator_fetched(account_ids, collected_at)
+    elif watchlist:
+        # 老路径：单会话整批全量抓（无库 / 非 MediaCrawler / adapter 不支持列表）
         notes_per_account = config.creator.notes_per_account
-        # 进度显示：adapter 支持进度事件（有 on_progress 属性，如 MediaCrawler）才注入
-        # 回调；非 TTY 时 creator_progress 直接给 None，adapter 零回调开销
         names = {wa.account_id: wa.nickname or wa.account_id for wa in watchlist}
         try:
             with progress.creator_progress(
-                len(watchlist),
-                names,
-                notes_per_creator=notes_per_account,
+                len(watchlist), names, notes_per_creator=notes_per_account
             ) as on_progress:
                 with _attach_progress(adapter, on_progress):
                     creator_result = adapter.fetch_creator_notes(
-                        [account.account_id for account in watchlist],
-                        notes_per_account,
-                        collected_at,
+                        account_ids, notes_per_account, collected_at
                     )
         except NotImplementedError:
             logger.warning("创作者笔记采集：跳过（数据源不支持）")
@@ -284,26 +331,21 @@ def _sync_stage(
             log_result(logger, creator_result)
             creator_notes = creator_result.notes
             creator_profiles = creator_result.profiles
-            creator_comments = creator_result.comments  # 全量：随笔记带回的评论
+            creator_comments = creator_result.comments
             watchlist = _backfill_watchlist_nicknames(watchlist, creator_result.accounts)
-            logger.info("创作者笔记：采到 %d 条", len(creator_notes))
-            logger.info("创作者档案：%d 份", len(creator_profiles))
-            logger.info("随笔记评论：采到 %d 条", len(creator_comments))
+            logger.info(
+                "创作者笔记：采到 %d · 档案 %d · 随帖评论 %d",
+                len(creator_notes),
+                len(creator_profiles),
+                len(creator_comments),
+            )
             if store is not None:
                 store.upsert_accounts(creator_result.accounts)
                 store.upsert_notes(creator_notes)
                 store.upsert_profiles(creator_profiles)
                 store.upsert_comments(creator_comments)
-                # 标记「本次拉过主页」——即使某账号 0 篇也标，稳态下靠去重不会重复入库
-                store.mark_creator_fetched([wa.account_id for wa in watchlist], collected_at)
-                # 评论随笔记一同抓回 → 这些笔记评论视为已抓（增量据此跳过重抓）
+                store.mark_creator_fetched(account_ids, collected_at)
                 store.mark_comments_fetched([n.note_id for n in creator_notes], collected_at)
-                logger.info(
-                    "入库：creator 笔记 %d · 档案 %d · 评论 %d",
-                    len(creator_notes),
-                    len(creator_profiles),
-                    len(creator_comments),
-                )
     else:
         logger.info("watchlist：为空，跳过创作者笔记采集")
 

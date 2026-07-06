@@ -6,6 +6,7 @@ Playwright 环境与登录态，不进 CI。
 """
 
 import hashlib
+import json
 import logging
 import re
 import shutil
@@ -720,5 +721,122 @@ class MediaCrawlerAdapter(ResearchAdapter):
             comments=comments,
             raw_path=str(save_path),
             error=error,
+            command=" ".join(cmd),
+        )
+
+    # ---- 两段式增量：列表 → 库 diff → 只抓新帖详情 ----
+    def _build_list_command(self, account_ids: list[str], save_path: Path) -> list[str]:
+        # creator + --list_only：只拉主页 note 列表（id/token/卡片计数），跳详情/评论/图
+        cmd = self._base_command(save_path) + [
+            "--type",
+            "creator",
+            "--creator_id",
+            ",".join(account_ids),
+            "--list_only",
+            "yes",
+            "--crawler_max_notes_count",
+            str(self.max_notes),
+        ]
+        return self._append_cookies(cmd)
+
+    def _read_note_cards(self, save_path: Path, collected_at: str) -> list[dict]:
+        cards = []
+        for line in self._read_jsonl(save_path, "xhs/jsonl/*_notelist_*.jsonl"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                cards.append(json.loads(line))
+            except ValueError:
+                continue  # 坏行跳过，不坏整跑
+        return cards
+
+    def list_creator_notes(
+        self, account_ids: list[str], collected_at: str
+    ) -> tuple[list[dict], list[CreatorProfile]]:
+        """列表模式：只拉 note 卡片（id/token/计数）+ 创作者档案，不抓详情。省请求的大头。"""
+        save_path = self._save_path(collected_at) / "creator-list"
+        cmd = self._build_list_command(account_ids, save_path)
+        timeout = self._session_budget(self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
+        try:
+            _rc, out = self._run_crawler(cmd, timeout=timeout)
+            self._write_crawler_log(save_path, out)
+        except subprocess.TimeoutExpired as e:
+            self._write_crawler_log(save_path, f"list timed out {timeout}s\n{e.output or ''}")
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+            self._write_crawler_log(save_path, f"list run failed: {e}")
+        cards: list[dict] = []
+        profiles: list[CreatorProfile] = []
+        try:
+            cards = self._read_note_cards(save_path, collected_at)
+            profiles = self._read_creator_profiles(save_path, collected_at)
+        except (OSError, ValueError) as e:
+            self._write_crawler_log(save_path, f"read list failed: {e}")
+        logger.info("列表模式：卡片 %d · 档案 %d", len(cards), len(profiles))
+        return cards, profiles
+
+    def _build_detail_command(self, urls: list[str], save_path: Path) -> list[str]:
+        cmd = self._base_command(save_path) + [
+            "--type",
+            "detail",
+            "--specified_id",
+            ",".join(urls),
+            "--get_comment",
+            "yes",
+            "--get_sub_comment",
+            "yes",
+            "--max_comments_count_singlenotes",
+            str(self._COMMENTS_PER_NOTE_CAP),
+        ]
+        if self.download_images:
+            cmd += ["--get_images", "yes"]
+        return self._append_cookies(cmd)
+
+    @staticmethod
+    def _card_note_url(card: dict) -> str:
+        nid = card.get("note_id", "")
+        token = card.get("xsec_token", "")
+        source = card.get("xsec_source") or "pc_feed"
+        return f"https://www.xiaohongshu.com/explore/{nid}?xsec_token={token}&xsec_source={source}"
+
+    def fetch_note_details(self, cards: list[dict], collected_at: str) -> FetchResult:
+        """详情模式：对给定卡片（新帖）抓 正文 + 一级/二级评论 + 图片，图提升到 media 库。"""
+        save_path = self._save_path(collected_at) / "detail"
+        urls = [self._card_note_url(c) for c in cards if c.get("note_id")]
+        cmd = self._build_detail_command(urls, save_path)
+        timeout = self._session_budget(self._COMMENT_PER_NOTE_SEC * max(len(urls), 1))
+        run_error: str | None = None
+        out = ""
+        try:
+            _rc, out = self._run_crawler(cmd, timeout=timeout)
+            self._write_crawler_log(save_path, out)
+        except subprocess.TimeoutExpired as e:
+            run_error = f"detail timed out after {timeout}s"
+            self._write_crawler_log(save_path, f"{run_error}\n{e.output or ''}")
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
+            run_error = f"run failed: {e}"
+            self._write_crawler_log(save_path, run_error)
+        notes: list[Note] = []
+        accounts: list[Account] = []
+        comments: list[Comment] = []
+        try:
+            # detail 模式写 detail_contents_*.jsonl（与 creator/search 同格式，同一 parser）
+            lines = self._read_jsonl(save_path, "xhs/jsonl/*_contents_*.jsonl")
+            notes, accounts = parse_jsonl_lines(
+                lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
+            )
+            comments = self._read_comments(save_path, collected_at)
+            self._promote_images(notes, save_path)
+        except (OSError, ValueError) as e:
+            self._write_crawler_log(save_path, f"read detail failed: {e}")
+        return FetchResult(
+            provider=self.provider_name,
+            operation="note_details",
+            collected_at=collected_at,
+            notes=notes,
+            accounts=accounts,
+            comments=comments,
+            raw_path=str(save_path),
+            error=run_error,
             command=" ".join(cmd),
         )

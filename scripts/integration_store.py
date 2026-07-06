@@ -231,11 +231,34 @@ def migration_check(db):
     print("  ✓ schema 自愈：旧库补 notes 列 + 重建 comments 全字段")
 
 
+def two_phase_check(db):
+    """两段式增量：首次库空→抓新帖详情入库；二次库里已有→无新帖→不抓详情（帖子尺度增量）。"""
+    from src.adapters.fixture_adapter import FixtureAdapter
+    from src.pipelines.run_research import _creator_two_phase
+
+    _drop(db)
+    s = MySQLStore(db)
+    a = FixtureAdapter(
+        "tests/fixtures/search_contents_sample.jsonl",
+        creator_path="tests/fixtures/creator_contents_sample.jsonl",
+        comments_path="tests/fixtures/comments.jsonl",
+    )
+    ids = ["601d0481000000000101cc46"]
+    notes1, _, _ = _creator_two_phase(a, ids, "2026-07-06T00:00:00+00:00", s)
+    assert len(notes1) >= 1, "首次应抓到新帖详情"
+    notes2, _, _ = _creator_two_phase(a, ids, "2026-07-07T00:00:00+00:00", s)
+    assert notes2 == [], "二次应跳过已有帖、不抓详情"
+    s.close()
+    _drop(db)
+    print("  ✓ 两段式：新帖抓详情、老帖跳过（帖子尺度增量）")
+
+
 def main():
     db = sys.argv[1] if len(sys.argv) > 1 else "xhs_recon_itest"
     print(f"MySQLStore 真库验收（测试库 {db}）：")
     run(db)
     migration_check(db)
+    two_phase_check(db)
     print("OK：全部通过")
     return 0
 

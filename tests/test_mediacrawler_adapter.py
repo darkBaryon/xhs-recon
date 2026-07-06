@@ -323,6 +323,31 @@ def test_build_creator_command_can_disable_image_download(tmp_path):
     assert "--get_images" not in cmd
 
 
+def test_build_list_command_is_list_only(tmp_path):
+    cmd = _adapter(tmp_path)._build_list_command(["a1", "a2"], tmp_path)
+    assert cmd[cmd.index("--type") + 1] == "creator"
+    assert cmd[cmd.index("--creator_id") + 1] == "a1,a2"
+    assert cmd[cmd.index("--list_only") + 1] == "yes"
+    # 列表模式不抓评论/图（那是详情段的事）
+    assert "--get_comment" not in cmd
+    assert "--get_images" not in cmd
+
+
+def test_build_detail_command_full_capture(tmp_path):
+    cmd = _adapter(tmp_path)._build_detail_command(["https://x/n1"], tmp_path)
+    assert cmd[cmd.index("--type") + 1] == "detail"
+    assert cmd[cmd.index("--get_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_images") + 1] == "yes"
+
+
+def test_card_note_url_builds_explore_url():
+    url = MediaCrawlerAdapter._card_note_url(
+        {"note_id": "n1", "xsec_token": "tok", "xsec_source": "pc_feed"}
+    )
+    assert "explore/n1" in url and "xsec_token=tok" in url and "xsec_source=pc_feed" in url
+
+
 def test_promote_images_copies_raw_to_media(tmp_path):
     """MC 下到 raw 的图复制到持久 media 库，image_paths 存 media 绝对路径；没图保持 []。"""
     from src.models import Note
