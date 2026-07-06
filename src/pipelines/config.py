@@ -58,6 +58,8 @@ class MediaCrawlerCfg(BaseModel):
     timeout: int = 600
     max_concurrency: int = 1
     sleep_sec: float = 2.0
+    # 全量采集：creator 会话下载原图到本地（URL 带时间签名几天即失效，唯下载可永久看）
+    download_images: bool = True
 
 
 class LoggingCfg(BaseModel):

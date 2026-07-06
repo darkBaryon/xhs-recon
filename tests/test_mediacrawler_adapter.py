@@ -310,6 +310,51 @@ def test_build_creator_command_joins_ids_single_session(tmp_path):
     assert cmd[cmd.index("--crawler_max_notes_count") + 1] == "7"
     assert cmd[cmd.index("--max_concurrency_num") + 1] == "1"  # 单并发不变
     assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "2.0"
+    # 全量采集：评论随会话抓 + 默认下载原图
+    assert cmd[cmd.index("--get_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "yes"
+    assert cmd[cmd.index("--get_images") + 1] == "yes"
+
+
+def test_build_creator_command_can_disable_image_download(tmp_path):
+    cmd = _adapter(tmp_path, download_images=False)._build_creator_command(
+        ["601d0481000000000101cc46"], 5, tmp_path / "creator"
+    )
+    assert "--get_images" not in cmd
+
+
+def test_attach_image_paths_fills_downloaded_files(tmp_path):
+    """MC 落图在 {save_path}/xhs/images/{note_id}/ → 回填 note.image_paths；没图保持 []。"""
+    from src.models import Note
+
+    def _note(nid):
+        return Note(
+            note_id=nid,
+            account_id="u",
+            title="t",
+            body="b",
+            tags=[],
+            url="",
+            like_count=0,
+            collect_count=0,
+            comment_count=0,
+            published_at="",
+            collected_at="2026",
+            source_keywords=[],
+            raw_path="",
+        )
+
+    save = tmp_path / "creator"
+    img_dir = save / "xhs" / "images" / "n1"
+    img_dir.mkdir(parents=True)
+    (img_dir / "0.jpg").write_bytes(b"x")
+    (img_dir / "1.jpg").write_bytes(b"y")
+
+    notes = [_note("n1"), _note("n2")]
+    _adapter(tmp_path)._attach_image_paths(notes, save)
+
+    assert [Path(p).name for p in notes[0].image_paths] == ["0.jpg", "1.jpg"]
+    assert notes[1].image_paths == []
 
 
 def test_fetch_creator_notes_single_session_reads_combined_jsonl(tmp_path, monkeypatch):

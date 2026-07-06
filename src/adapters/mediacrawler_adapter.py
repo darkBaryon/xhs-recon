@@ -79,6 +79,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
         max_concurrency: int = 1,
         sleep_sec: float = 2.0,
         timeout: int = 600,
+        download_images: bool = True,
         launcher: list[str] | None = None,
     ):
         self.mediacrawler_dir = str(mediacrawler_dir)
@@ -88,6 +89,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self.cookies = cookies
         self.sort_type = sort_type
         self.max_notes = max_notes
+        # 全量采集：creator 会话下载原图到本地（XHS 图片 URL 带时间签名、几天即 403，
+        # 只有爬取当下下载才永久可看）；search 保持轻量不下图
+        self.download_images = download_images
         self.max_concurrency = max_concurrency
         self.sleep_sec = sleep_sec
         self.timeout = timeout
@@ -204,6 +208,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "--crawler_max_notes_count",
             str(limit or self.max_notes),
         ]
+        if self.download_images:
+            # fork 加的透传 flag（缺省 no）：下载原图到 {save_path}/xhs/images/{note_id}/
+            cmd += ["--get_images", "yes"]
         return self._append_cookies(cmd)
 
     def _session_budget(self, scaled: int) -> int:
@@ -300,6 +307,20 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return parse_jsonl_lines(
             lines, keyword="", collected_at=collected_at, raw_path=str(save_path)
         )
+
+    def _attach_image_paths(self, notes: list[Note], save_path: Path) -> None:
+        """把 MC 下载的原图路径填进 note.image_paths（就地）。
+
+        MC 落图在 {save_path}/xhs/images/{note_id}/<N>.jpg（视频 videos/ 同构）。
+        存绝对路径字符串：图片在 gitignore 的 data/raw 下，仅本机消费。没图的笔记保持 []。
+        """
+        img_root = save_path / "xhs" / "images"
+        if not img_root.is_dir():
+            return
+        for n in notes:
+            d = img_root / n.note_id
+            if d.is_dir():
+                n.image_paths = sorted(str(p) for p in d.iterdir() if p.is_file())
 
     def _read_creator_profiles(self, save_path: Path, collected_at: str):
         # 档案软信号：旧版 fork 无此文件 / 抓取失败 / 罕见 IO 异常 → 空列表，
@@ -649,6 +670,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
             profiles = self._read_creator_profiles(save_path, collected_at)
             # 全量：同会话带回的评论也一并读出（get_comment=yes 落在 *_comments_*.jsonl）
             comments = self._read_comments(save_path, collected_at)
+            # 全量：下载的原图路径回填（download_images=yes 落在 xhs/images/{note_id}/）
+            self._attach_image_paths(notes, save_path)
         except (OSError, ValueError) as e:
             self._write_crawler_log(save_path, f"read creator failed: {e}")
         if rc not in (0, None):

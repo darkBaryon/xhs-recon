@@ -73,6 +73,16 @@ def run(db):
     assert r["last_collected_at"] == "2026-07-05T00:00:00+00:00", "last_collected_at 未刷新"
     print("  ✓ 幂等 upsert / first 保留 / 易变刷新")
 
+    # 1b) image_paths 空不覆盖：creator 下图后，search（恒 []）再遇同帖不得冲掉
+    n_img = _note("N1", "2026-07-06T00:00:00+00:00")
+    n_img.image_paths = ["/raw/xhs/images/N1/0.jpg"]
+    s.upsert_notes([n_img])
+    s.upsert_notes([_note("N1", "2026-07-07T00:00:00+00:00")])  # image_paths=[]
+    with s.conn.cursor() as cur:
+        cur.execute("SELECT image_paths FROM notes WHERE note_id='N1'")
+        assert "0.jpg" in cur.fetchone()["image_paths"], "空 image_paths 覆盖了已下载图路径"
+    print("  ✓ image_paths 空不覆盖（search 不冲掉 creator 已下的图）")
+
     # 2) 评论按 (note_id, 正文哈希) 去重
     dup = Comment(body="同一句", note_id="N1", like_count=3, collected_at="2026-07-05")
     s.upsert_comments([dup, dup])
@@ -126,7 +136,9 @@ def run(db):
         ]
     )
     notes = s.load_notes()
-    assert any(n.note_id == "N1" and n.like_count == 999 and n.tags == ["留学"] for n in notes)
+    # like=10：1b 步骤最后一次 upsert 的值（易变字段随最近一次刷新）
+    assert any(n.note_id == "N1" and n.like_count == 10 and n.tags == ["留学"] for n in notes)
+    assert any(n.image_paths == ["/raw/xhs/images/N1/0.jpg"] for n in notes), "图路径往返失败"
     assert s.load_accounts()[0].note_count == 3
     with s.conn.cursor() as cur:
         cur.execute("SELECT creator_fetched_at FROM accounts WHERE account_id='U1'")

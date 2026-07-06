@@ -162,12 +162,13 @@ class MySQLStore(Store):
                      note_type=VALUES(note_type), video_url=VALUES(video_url),
                      share_count=VALUES(share_count), author_avatar=VALUES(author_avatar),
                      ip_location=VALUES(ip_location), image_urls=VALUES(image_urls),
-                     image_paths=VALUES(image_paths),
+                     image_paths=IF(VALUES(image_paths)='[]', image_paths,
+                                    VALUES(image_paths)),
                      last_collected_at=VALUES(last_collected_at)""",
                 # first_collected_at 不在 UPDATE 列表 → 已存在时保留原值（幂等关键）；
                 # comments_fetched_at 不插不更 → 保留（不因再遇到而清空）。
-                # image_paths 空列表时 UPDATE 会覆盖：B 阶段下载后单独回填，此处灌 URL 层不清空——
-                # 故仅当新值非空才该覆盖；用 COALESCE 逻辑留待 B 阶段，A 阶段 image_paths 恒空。
+                # image_paths「空不覆盖」：只有 creator 会话下图（search 恒 []），
+                # 否则 search 再遇同帖会把已下载的图路径冲掉。
                 [
                     (
                         n.note_id,

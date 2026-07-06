@@ -66,6 +66,7 @@ def build_adapter(config: RunConfig) -> ResearchAdapter:
                 max_concurrency=mc.max_concurrency,
                 sleep_sec=mc.sleep_sec,
                 timeout=mc.timeout,
+                download_images=mc.download_images,
             )
         # creator_fixture_path is fixture-provider only; MediaCrawler mode must use
         # MediaCrawler creator output. The unavailable-dir fallback keeps that boundary explicit.
