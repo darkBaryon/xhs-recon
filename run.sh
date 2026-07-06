@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # xhs-recon 启动脚本
-#   ./run.sh            # 离线 fixture demo（无需登录/浏览器）
-#   ./run.sh search     # 真实·广角：关键词搜索+榜单（每周）
-#   ./run.sh track      # 真实·长焦：watchlist→creator 主页/档案（每周，可独立跑）
-#   ./run.sh comments   # 真实·深读：补采评论（做深度分析时）
+#   ./run.sh            # 离线 fixture demo（无需登录/浏览器，用 configs/sample.yaml）
+#   ./run.sh search     # 真实·广角：关键词搜索+榜单（关键词分批，进新领域时）
+#   ./run.sh track      # 真实·长焦：watchlist→creator（含评论+原图，账号轮转，日常盯人）
 #   ./run.sh real       # 真实·全流程（= research）
 #   ./run.sh browser    # 只启动/检查采集浏览器（专用 profile + CDP 9222）
 #   ./run.sh web        # 把最新一跑渲染成本地静态站并打开（离线，无需采集）
@@ -82,7 +81,7 @@ case "$cmd" in
   demo)
     exec uv run python -m src.pipelines.run_research --config configs/sample.yaml "$@"
     ;;
-  search|track|comments)
+  search|track)
     ensure_browser
     acquire_run_lock
     uv run python -m src.pipelines.cli "$cmd" --config "$CONFIG" "$@"
@@ -107,7 +106,7 @@ case "$cmd" in
     exec uv run python -m src.pipelines.cli bundle --config "$CONFIG" "$@"
     ;;
   *)
-    echo "用法: ./run.sh [demo|search|track|comments|real|browser|web|bundle]" >&2
+    echo "用法: ./run.sh [demo|search|track|real|browser|web|bundle]" >&2
     exit 2
     ;;
 esac

@@ -185,46 +185,11 @@ def test_cli_track_missing_rank_degrades_to_manual_only(tmp_path):
     assert "manual" in watch
 
 
-def test_cli_comments_backfills_report_and_keeps_others(tmp_path):
+def test_full_chain_search_track(tmp_path):
+    """推荐链路端到端：search + track 顺序执行全通（评论已随 track 抓回，无单独 comments 命令）。"""
     out = tmp_path / "out"
     cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
-    assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
-    assert runner.invoke(app, ["track", "--config", cfg_path]).exit_code == 0
-    before = _snapshot(_run_dir(out))
-
-    result = runner.invoke(app, ["comments", "--config", cfg_path])
-    assert result.exit_code == 0
-    after = _snapshot(_run_dir(out))
-
-    assert set(after) - set(before) == {"comments.csv"}
-    assert after["report_input.md"] != before["report_input.md"]  # 织入评论后重写
-    assert "评论".encode() in after["report_input.md"]
-    changed = {n for n in before if after[n] != before[n]}
-    assert changed == {"report_input.md"}  # 其余文件字节不变
-
-
-def test_cli_comments_without_run_exits(tmp_path):
-    cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(tmp_path / "out"))
-    assert runner.invoke(app, ["comments", "--config", cfg_path]).exit_code == 1
-
-
-def test_cli_comments_respects_enabled_flag(tmp_path):
-    """现行为回归锁（实施偏差4，待用户裁决）：enabled=false 时显式 cli comments 也不采集。"""
-    out = tmp_path / "out"
-    cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out, comments=False))
-    assert runner.invoke(app, ["search", "--config", cfg_path]).exit_code == 0
-
-    result = runner.invoke(app, ["comments", "--config", cfg_path])
-    assert result.exit_code == 0
-    names = set(_snapshot(_run_dir(out)))
-    assert "comments.csv" not in names  # 开关拦下，未采集
-
-
-def test_full_chain_search_track_comments(tmp_path):
-    """推荐链路端到端：三命令顺序执行全通，产物聚在同一运行目录。"""
-    out = tmp_path / "out"
-    cfg_path = _write_cfg(tmp_path, "c.yaml", _cfg(out))
-    for cmd in ["search", "track", "comments"]:
+    for cmd in ["search", "track"]:
         assert runner.invoke(app, [cmd, "--config", cfg_path]).exit_code == 0, cmd
     names = set(_snapshot(_run_dir(out)))
     assert {
@@ -236,52 +201,21 @@ def test_full_chain_search_track_comments(tmp_path):
         "watchlist.csv",
         "creator_notes.csv",
         "account_profile.csv",
-        "comments.csv",
     } <= names
 
 
-class _CaptureCommentsAdapter:
-    """B3 用：记录 fetch_comments 实际收到的典型笔记数。"""
-
-    def __init__(self, inner):
-        self._inner = inner
-        self.seen: list[int] = []
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-    def fetch_comments(self, notes, limit, collected_at):
-        self.seen.append(len(notes))
-        return self._inner.fetch_comments(notes, limit, collected_at)
-
-
-def test_comments_stage_caps_typical_notes(monkeypatch):
-    """B3：典型笔记超 comments.max_notes 时按分数截前 N 采评论（实测 119 条必超时的修复）。"""
+def test_comments_folded_into_creator_fetch():
+    """全量采集：评论随 creator 一同带回（FetchResult.comments 非空），不再走单独命令。"""
     from src.adapters.fixture_adapter import FixtureAdapter
-    from src.models import TypicalNote
-    from src.pipelines.config import RunConfig
-    from src.pipelines.run_research import _comments_stage
 
-    adapter = _CaptureCommentsAdapter(
-        FixtureAdapter(
-            "tests/fixtures/search_contents_sample.jsonl",
-            comments_path="tests/fixtures/comments.jsonl",
-        )
+    adapter = FixtureAdapter(
+        "tests/fixtures/search_contents_sample.jsonl",
+        creator_path="tests/fixtures/creator_contents_sample.jsonl",
+        comments_path="tests/fixtures/comments.jsonl",
     )
-    typical = [
-        TypicalNote(
-            account_id="a",
-            note_id=f"n{i}",
-            title="t",
-            url=f"https://example.com/n{i}",
-            note_score=float(i),
-            selection_reason="top",
-        )
-        for i in range(10)
-    ]
-    cfg = RunConfig.model_validate({"comments": {"enabled": True, "limit": 5, "max_notes": 3}})
-    _comments_stage(cfg, adapter, typical, "2026")
-    assert adapter.seen == [3]  # 只送前 3 条（按 note_score 降序）
+    r = adapter.fetch_creator_notes(["601d0481000000000101cc46"], 3, "2026")
+    assert r.ok
+    assert len(r.comments) >= 1  # 评论随 creator 结果一并返回
 
 
 def test_cli_track_produces_creator_profiles(tmp_path):

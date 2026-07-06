@@ -20,7 +20,7 @@ from src.adapters.parsers import (
     parse_jsonl_lines,
 )
 from src.core.ports import ResearchAdapter
-from src.models import Account, CreatorProfile, FetchResult, Note, TypicalNote
+from src.models import Account, Comment, CreatorProfile, FetchResult, Note, TypicalNote
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
     _SEARCH_PER_KEYWORD_PAGE_SEC = 120
     # 单会话 comments 超时按笔记数缩放的每笔记预算（秒）：扁平 600s 对 30 篇不够（实测超时）
     _COMMENT_PER_NOTE_SEC = 120
+    # 全量采集：creator 抓每篇笔记随带的一级评论上限（二级评论另计）
+    _COMMENTS_PER_NOTE_CAP = 30
 
     def __init__(
         self,
@@ -187,15 +189,18 @@ class MediaCrawlerAdapter(ResearchAdapter):
     ) -> list[str]:
         # 单会话多账号:--creator_id 接受逗号分隔列表，MC 在一次会话里顺序拉完
         # （省掉逐账号的浏览器启动开销）；单并发与 sleep 间隔来自 _base_command，速率不放大。
+        # 全量采集：creator 同会话带回每篇笔记的一级+二级评论（省掉单独 comments 命令）。
         cmd = self._base_command(save_path) + [
             "--type",
             "creator",
             "--creator_id",
             ",".join(account_ids),
             "--get_comment",
-            "no",
+            "yes",
             "--get_sub_comment",
-            "no",
+            "yes",
+            "--max_comments_count_singlenotes",
+            str(self._COMMENTS_PER_NOTE_CAP),
             "--crawler_max_notes_count",
             str(limit or self.max_notes),
         ]
@@ -638,9 +643,12 @@ class MediaCrawlerAdapter(ResearchAdapter):
         notes: list[Note] = []
         accounts: list[Account] = []
         profiles: list[CreatorProfile] = []
+        comments: list[Comment] = []
         try:
             notes, accounts = self._read_creator_results(save_path, collected_at)
             profiles = self._read_creator_profiles(save_path, collected_at)
+            # 全量：同会话带回的评论也一并读出（get_comment=yes 落在 *_comments_*.jsonl）
+            comments = self._read_comments(save_path, collected_at)
         except (OSError, ValueError) as e:
             self._write_crawler_log(save_path, f"read creator failed: {e}")
         if rc not in (0, None):
@@ -672,6 +680,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             notes=notes,
             accounts=accounts,
             profiles=profiles,
+            comments=comments,
             raw_path=str(save_path),
             error=error,
             command=" ".join(cmd),

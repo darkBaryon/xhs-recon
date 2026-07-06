@@ -129,6 +129,14 @@ class FixtureAdapter(ResearchAdapter):
             accounts.append(account)
 
         profiles = self._read_creator_profiles(wanted, collected_at)
+        # 全量采集：评论随 creator 笔记一同带回（真实 adapter 同会话抓，夹具从 comments_path 读）
+        comments = []
+        if self._comments_path is not None:
+            try:
+                ctext = self._comments_path.read_text(encoding="utf-8")
+                comments = parse_comments_jsonl_lines(ctext.splitlines(), collected_at=collected_at)
+            except OSError:
+                comments = []
         return FetchResult(
             provider=self.provider_name,
             operation="creator_notes",
@@ -136,6 +144,7 @@ class FixtureAdapter(ResearchAdapter):
             notes=notes,
             accounts=accounts,
             profiles=profiles,
+            comments=comments,
             raw_path=str(self._creator_path),
             raw_text=text,
         )

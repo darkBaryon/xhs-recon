@@ -29,7 +29,6 @@ from src.models import (
     CreatorProfile,
     FetchResult,
     Note,
-    TypicalNote,
     WatchAccount,
 )
 from src.pipelines import progress, runtime
@@ -120,6 +119,7 @@ class SyncArtifacts(BaseModel):
     creator_notes: list[Note] | None = None
     account_profiles: list[AccountRank] | None = None
     creator_profiles: list[CreatorProfile] | None = None
+    comments: list[Comment] | None = None  # 全量：creator 同会话带回的评论
 
 
 def _search_stage(
@@ -233,6 +233,7 @@ def _sync_stage(
 
     creator_notes: list[Note] = []
     creator_profiles: list[CreatorProfile] = []
+    creator_comments: list[Comment] = []
     if watchlist:
         notes_per_account = config.creator.notes_per_account
         # 进度显示：adapter 支持进度事件（有 on_progress 属性，如 MediaCrawler）才注入
@@ -256,17 +257,25 @@ def _sync_stage(
             log_result(logger, creator_result)
             creator_notes = creator_result.notes
             creator_profiles = creator_result.profiles
+            creator_comments = creator_result.comments  # 全量：随笔记带回的评论
             watchlist = _backfill_watchlist_nicknames(watchlist, creator_result.accounts)
             logger.info("创作者笔记：采到 %d 条", len(creator_notes))
             logger.info("创作者档案：%d 份", len(creator_profiles))
+            logger.info("随笔记评论：采到 %d 条", len(creator_comments))
             if store is not None:
                 store.upsert_accounts(creator_result.accounts)
                 store.upsert_notes(creator_notes)
                 store.upsert_profiles(creator_profiles)
+                store.upsert_comments(creator_comments)
                 # 标记「本次拉过主页」——即使某账号 0 篇也标，稳态下靠去重不会重复入库
                 store.mark_creator_fetched([wa.account_id for wa in watchlist], collected_at)
+                # 评论随笔记一同抓回 → 这些笔记评论视为已抓（增量据此跳过重抓）
+                store.mark_comments_fetched([n.note_id for n in creator_notes], collected_at)
                 logger.info(
-                    "入库：creator 笔记 %d · 档案 %d", len(creator_notes), len(creator_profiles)
+                    "入库：creator 笔记 %d · 档案 %d · 评论 %d",
+                    len(creator_notes),
+                    len(creator_profiles),
+                    len(creator_comments),
                 )
     else:
         logger.info("watchlist：为空，跳过创作者笔记采集")
@@ -286,66 +295,8 @@ def _sync_stage(
         creator_notes=creator_notes,
         account_profiles=account_profiles,
         creator_profiles=creator_profiles,
+        comments=creator_comments,
     )
-
-
-def _comments_stage(
-    config: RunConfig,
-    adapter: ResearchAdapter,
-    typical: list[TypicalNote],
-    collected_at: str,
-    store: Store | None = None,
-) -> list[Comment]:
-    """评论段：对典型笔记批量采一级评论（可关）。
-
-    store 非空时先增量过滤——只保留「从没抓过评论 / 超 refresh_days」的目标，
-    抓到评论后 upsert 入库并标记 comments_fetched_at（省下已抓笔记的重复详情请求）。"""
-    comments_cfg = config.comments
-    comments: list[Comment] = []
-    if comments_cfg.enabled:
-        # 增量：库里已抓过评论（且未过期）的典型笔记直接跳过，是本重构省请求的大头
-        if store is not None:
-            before = len(typical)
-            typical = store.notes_needing_comments(typical, comments_cfg.refresh_days, collected_at)
-            skipped = before - len(typical)
-            if skipped:
-                logger.info("评论增量：%d 条已抓过跳过，仅抓 %d 条新的", skipped, len(typical))
-            if not typical:
-                logger.info("评论增量：无新笔记需抓评论，跳过")
-                return []
-        # 批量上限：典型笔记随账号数线性膨胀（实测 119 条单命令必超时），按分数截前 N
-        max_notes = comments_cfg.max_notes
-        targets = typical
-        if max_notes and len(typical) > max_notes:
-            targets = sorted(typical, key=lambda t: t.note_score, reverse=True)[:max_notes]
-            logger.info(
-                "评论：典型笔记 %d 条超上限，按分数取前 %d 条（comments.max_notes）",
-                len(typical),
-                max_notes,
-            )
-        # 进行时提示：单个子进程批量采，adapter 会按篇往日志写「N/总 完成」进度
-        logger.info("评论：开始采集 %d 条典型笔记（单并发批量，逐篇进度见日志）", len(targets))
-        try:
-            with progress.spinner(f"评论采集：{len(targets)} 条典型笔记…"):
-                comment_result = adapter.fetch_comments(targets, comments_cfg.limit, collected_at)
-        except NotImplementedError:
-            comment_result = None
-            logger.info("评论：跳过（数据源不支持）")
-        if comment_result and comment_result.ok:
-            log_result(logger, comment_result)
-            comments = comment_result.comments
-            logger.info("评论：采到 %d 条", len(comments))
-        elif comment_result:
-            log_result(logger, comment_result)
-            logger.info("评论：采到 0 条")
-        if store is not None and comment_result is not None:
-            # 抓成功（含抓到 0 条）就入库并标记；仅在 adapter 不支持（None）时不标，留待重试
-            store.upsert_comments(comments)
-            store.mark_comments_fetched([t.note_id for t in targets], collected_at)
-            logger.info("入库：评论 %d 条 · 标记 %d 篇已抓", len(comments), len(targets))
-    else:
-        logger.info("评论：跳过（未启用）")
-    return comments
 
 
 def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
@@ -362,7 +313,8 @@ def run_research(config_path: str, *, verbose: bool = False) -> dict[str, str]:
     )
     logger.info("选出典型笔记：%d 条", len(typical))
 
-    comments = _comments_stage(config, adapter, typical, collected_at, store)
+    # 全量采集：评论随 creator 笔记一同抓回（见 _sync_stage），不再单独跑评论段
+    comments = sync.comments or []
 
     # 按运行归档：每次导出独立时间戳目录（与 run 日志同一时间戳，可互相对上），不覆盖历史
     out_base = Path(config.export.out_dir)
