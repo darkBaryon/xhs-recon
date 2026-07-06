@@ -82,6 +82,13 @@ def parse_note(row: dict, *, keyword: str, collected_at: str, raw_path: str) -> 
         collected_at=collected_at,
         source_keywords=[kw] if kw else [],
         raw_path=raw_path,
+        # 全量字段（MediaCrawler 已在 jsonl 里给了，之前被裁掉）
+        note_type=row.get("type") or "",
+        video_url=row.get("video_url") or "",
+        share_count=normalize_count(row.get("share_count")),
+        author_avatar=row.get("avatar") or "",
+        ip_location=row.get("ip_location") or "",
+        image_urls=split_tags(row.get("image_list")),  # 逗号拼接的图片 URL
     )
 
 
@@ -98,11 +105,22 @@ def parse_account(row: dict, *, keyword: str, collected_at: str) -> Account:
 
 
 def parse_comment(row: dict, *, collected_at: str) -> Comment:
+    # 全量：保留评论者身份/楼层/配图（推翻早期四项裁剪红线，用户明确扩范围）。
+    # 二级评论在 MediaCrawler 输出里也是一条 comment，靠 parent_comment_id 区分。
     return Comment(
         body=row.get("content", ""),
         note_id=row.get("note_id", ""),
         like_count=normalize_count(row.get("like_count")),
         collected_at=collected_at,
+        comment_id=str(row.get("comment_id") or ""),
+        parent_comment_id=str(row.get("parent_comment_id") or ""),
+        author_id=row.get("user_id") or "",
+        author_nickname=row.get("nickname") or "",
+        author_avatar=row.get("avatar") or "",
+        ip_location=row.get("ip_location") or "",
+        pictures=split_tags(row.get("pictures")),
+        sub_comment_count=normalize_count(row.get("sub_comment_count")),
+        created_at=epoch_ms_to_iso(row.get("create_time")),
     )
 
 

@@ -90,18 +90,19 @@ def test_epoch_conversion_bad_input():
     assert epoch_ms_to_iso("nope") == ""
 
 
-def test_parse_comment_drops_identity_fields():
+def test_parse_comment_keeps_full_fields():
+    """全量采集：评论保留身份/楼层/配图（推翻早期四项裁剪红线，用户明确扩范围）。"""
     row = {
         "comment_id": "c1",
         "create_time": 1718359058000,
         "ip_location": "上海",
         "note_id": "n1",
         "content": "这个角度很有帮助",
-        "user_id": "user-secret",
-        "nickname": "昵称不能落盘",
+        "user_id": "user-abc",
+        "nickname": "某昵称",
         "avatar": "https://avatar.example/u.png",
         "sub_comment_count": "3",
-        "pictures": ["https://pic.example/1.png"],
+        "pictures": "https://pic.example/1.png,https://pic.example/2.png",
         "parent_comment_id": "0",
         "like_count": "1.2万",
     }
@@ -112,16 +113,16 @@ def test_parse_comment_drops_identity_fields():
     assert c.note_id == "n1"
     assert c.like_count == 12000
     assert c.collected_at == "2026"
-    assert c.model_dump() == {
-        "body": "这个角度很有帮助",
-        "note_id": "n1",
-        "like_count": 12000,
-        "collected_at": "2026",
-    }
-    assert not hasattr(c, "user_id")
-    assert not hasattr(c, "nickname")
-    assert "avatar" not in c.model_dump()
-    assert "ip_location" not in c.model_dump()
+    # 现在保留全字段
+    assert c.comment_id == "c1"
+    assert c.parent_comment_id == "0"
+    assert c.author_id == "user-abc"
+    assert c.author_nickname == "某昵称"
+    assert c.author_avatar == "https://avatar.example/u.png"
+    assert c.ip_location == "上海"
+    assert c.pictures == ["https://pic.example/1.png", "https://pic.example/2.png"]
+    assert c.sub_comment_count == 3
+    assert c.created_at == epoch_ms_to_iso(1718359058000)
 
 
 def test_parse_comments_jsonl_lines_skips_blank_lines():

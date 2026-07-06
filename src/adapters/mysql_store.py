@@ -42,18 +42,35 @@ _DDL = [
         comment_count INT NOT NULL DEFAULT 0,
         published_at VARCHAR(40) NOT NULL DEFAULT '',
         source_keywords LONGTEXT, raw_path TEXT,
+        note_type VARCHAR(32) NOT NULL DEFAULT '',
+        video_url TEXT,
+        share_count INT NOT NULL DEFAULT 0,
+        author_avatar TEXT,
+        ip_location VARCHAR(64) NOT NULL DEFAULT '',
+        image_urls LONGTEXT, image_paths LONGTEXT,
         first_collected_at VARCHAR(40) NOT NULL DEFAULT '',
         last_collected_at VARCHAR(40) NOT NULL DEFAULT '',
         comments_fetched_at VARCHAR(40) NULL,
         INDEX (account_id)
     ) CHARACTER SET utf8mb4""",
+    # comment_key = comment_id 优先，缺则正文哈希（兼容历史四项评论）；二级评论靠
+    # parent_comment_id 区分。like/sub_count 易变，ON DUPLICATE 刷新。
     """CREATE TABLE IF NOT EXISTS comments (
         note_id VARCHAR(64) NOT NULL,
-        body_hash CHAR(64) NOT NULL,
+        comment_key VARCHAR(64) NOT NULL,
+        comment_id VARCHAR(64) NOT NULL DEFAULT '',
+        parent_comment_id VARCHAR(64) NOT NULL DEFAULT '',
         body LONGTEXT,
+        author_id VARCHAR(64) NOT NULL DEFAULT '',
+        author_nickname VARCHAR(255) NOT NULL DEFAULT '',
+        author_avatar TEXT,
+        ip_location VARCHAR(64) NOT NULL DEFAULT '',
+        pictures LONGTEXT,
+        sub_comment_count INT NOT NULL DEFAULT 0,
         like_count INT NOT NULL DEFAULT 0,
+        created_at VARCHAR(40) NOT NULL DEFAULT '',
         collected_at VARCHAR(40) NOT NULL DEFAULT '',
-        PRIMARY KEY (note_id, body_hash)
+        PRIMARY KEY (note_id, comment_key)
     ) CHARACTER SET utf8mb4""",
     """CREATE TABLE IF NOT EXISTS creator_profiles (
         account_id VARCHAR(64) PRIMARY KEY,
@@ -132,17 +149,25 @@ class MySQLStore(Store):
                 """INSERT INTO notes
                      (note_id, account_id, title, body, tags, url,
                       like_count, collect_count, comment_count, published_at,
-                      source_keywords, raw_path, first_collected_at, last_collected_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                      source_keywords, raw_path, note_type, video_url, share_count,
+                      author_avatar, ip_location, image_urls, image_paths,
+                      first_collected_at, last_collected_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    ON DUPLICATE KEY UPDATE
                      title=VALUES(title), body=VALUES(body), tags=VALUES(tags),
                      url=VALUES(url), like_count=VALUES(like_count),
                      collect_count=VALUES(collect_count),
                      comment_count=VALUES(comment_count),
                      source_keywords=VALUES(source_keywords), raw_path=VALUES(raw_path),
+                     note_type=VALUES(note_type), video_url=VALUES(video_url),
+                     share_count=VALUES(share_count), author_avatar=VALUES(author_avatar),
+                     ip_location=VALUES(ip_location), image_urls=VALUES(image_urls),
+                     image_paths=VALUES(image_paths),
                      last_collected_at=VALUES(last_collected_at)""",
                 # first_collected_at 不在 UPDATE 列表 → 已存在时保留原值（幂等关键）；
-                # comments_fetched_at 不插不更 → 保留（不因再遇到而清空）
+                # comments_fetched_at 不插不更 → 保留（不因再遇到而清空）。
+                # image_paths 空列表时 UPDATE 会覆盖：B 阶段下载后单独回填，此处灌 URL 层不清空——
+                # 故仅当新值非空才该覆盖；用 COALESCE 逻辑留待 B 阶段，A 阶段 image_paths 恒空。
                 [
                     (
                         n.note_id,
@@ -157,6 +182,13 @@ class MySQLStore(Store):
                         n.published_at,
                         json.dumps(n.source_keywords, ensure_ascii=False),
                         n.raw_path,
+                        n.note_type,
+                        n.video_url,
+                        n.share_count,
+                        n.author_avatar,
+                        n.ip_location,
+                        json.dumps(n.image_urls, ensure_ascii=False),
+                        json.dumps(n.image_paths, ensure_ascii=False),
                         n.collected_at,
                         n.collected_at,
                     )
@@ -170,11 +202,31 @@ class MySQLStore(Store):
             return
         with self.conn.cursor() as cur:
             cur.executemany(
-                """INSERT IGNORE INTO comments
-                     (note_id, body_hash, body, like_count, collected_at)
-                   VALUES (%s,%s,%s,%s,%s)""",
+                """INSERT INTO comments
+                     (note_id, comment_key, comment_id, parent_comment_id, body,
+                      author_id, author_nickname, author_avatar, ip_location, pictures,
+                      sub_comment_count, like_count, created_at, collected_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON DUPLICATE KEY UPDATE
+                     like_count=VALUES(like_count),
+                     sub_comment_count=VALUES(sub_comment_count)""",
                 [
-                    (c.note_id, _hash(c.body), c.body, c.like_count, c.collected_at)
+                    (
+                        c.note_id,
+                        c.comment_id or _hash(c.body),
+                        c.comment_id,
+                        c.parent_comment_id,
+                        c.body,
+                        c.author_id,
+                        c.author_nickname,
+                        c.author_avatar,
+                        c.ip_location,
+                        json.dumps(c.pictures, ensure_ascii=False),
+                        c.sub_comment_count,
+                        c.like_count,
+                        c.created_at,
+                        c.collected_at,
+                    )
                     for c in comments
                 ],
             )
@@ -281,6 +333,13 @@ class MySQLStore(Store):
                 collected_at=r["last_collected_at"],
                 source_keywords=json.loads(r["source_keywords"] or "[]"),
                 raw_path=r["raw_path"] or "",
+                note_type=r["note_type"] or "",
+                video_url=r["video_url"] or "",
+                share_count=r["share_count"],
+                author_avatar=r["author_avatar"] or "",
+                ip_location=r["ip_location"] or "",
+                image_urls=json.loads(r["image_urls"] or "[]"),
+                image_paths=json.loads(r["image_paths"] or "[]"),
             )
             for r in rows
         ]

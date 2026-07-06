@@ -26,6 +26,14 @@ class Note(BaseModel):
     collected_at: str
     source_keywords: list[str]
     raw_path: str
+    # 全量采集拓展字段（默认空 → 旧构造/夹具不受影响）
+    note_type: str = ""  # normal（图文）/ video
+    video_url: str = ""
+    share_count: int = 0
+    author_avatar: str = ""  # 作者头像 URL
+    ip_location: str = ""
+    image_urls: list[str] = []  # 图片 CDN URL（带时间签名，会过期，仅留痕）
+    image_paths: list[str] = []  # 下载到本地的原图相对路径（永久可看，B 阶段填充）
 
 
 class Comment(BaseModel):
@@ -33,6 +41,17 @@ class Comment(BaseModel):
     note_id: str
     like_count: int
     collected_at: str
+    # 全量采集拓展字段（默认空 → 旧构造/夹具不受影响）。注意：这推翻了早期
+    # 「评论仅四项」的隐私裁剪红线，是用户明确扩范围的决定（含评论者身份）。
+    comment_id: str = ""
+    parent_comment_id: str = ""  # "0"/"" = 一级评论；非空 = 二级评论的父 id
+    author_id: str = ""
+    author_nickname: str = ""
+    author_avatar: str = ""
+    ip_location: str = ""
+    pictures: list[str] = []  # 评论配图 URL
+    sub_comment_count: int = 0
+    created_at: str = ""  # 评论发布时间（ISO；由 create_time 毫秒换算）
 
 
 class AccountRank(BaseModel):
