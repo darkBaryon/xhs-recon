@@ -77,6 +77,8 @@ uv run python -m src.recon.entrypoints.cli research --config configs/sample.yaml
 
 ```bash
 CONFIG=configs/AP-ALevel/run.yaml ./run.sh search
+CONFIG=configs/AP-ALevel/discovery-hot.yaml ./run.sh search  # 18 词分 3 批，批间暂停
+# discovery-pending.yaml 仅供风控恢复后补采缺口，不要与 discovery-hot.yaml 连续运行
 CONFIG=configs/留学辅导/run.yaml ./run.sh account
 CONFIG=configs/留学辅导/run.yaml ./run.sh track
 ```
@@ -144,6 +146,7 @@ search:
   sort: time_descending
   window_days: 90
   batch_size: 4
+  pause_between_batches_sec: 0
 
 creator:
   notes_per_account: 3

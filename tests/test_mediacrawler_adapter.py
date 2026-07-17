@@ -729,6 +729,28 @@ def test_search_many_nonzero_salvages_completed_keyword(tmp_path, monkeypatch, c
     assert "MediaCrawler 退出码 1" in caplog.text
 
 
+def test_search_many_risk_salvages_keyword_completed_before_captcha(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_notelist_2026.jsonl").write_text(
+            '{"note_id":"n1","user_id":"u1","source_keyword":"CAIE A-Level"}',
+            encoding="utf-8",
+        )
+        return 1, "CAPTCHA appeared, request failed, Verifytype: 216"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    results = a.search_many(["CAIE A-Level", "Edexcel A-Level"], 1, 10, "2026")
+
+    assert results[0].ok
+    assert results[0].notes[0].note_id == "n1"
+    assert not results[1].ok
+    assert "验证码/风控" in results[1].error
+
+
 def test_search_many_empty_keyword_reports_detail_failures(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
 

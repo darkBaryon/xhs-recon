@@ -6,6 +6,7 @@ from ...domain.policies.keywords import expand_keywords
 from ...domain.policies.ranking import rank_creators
 from ...domain.policies.time_window import filter_contents
 from ...domain.research import SearchAnalysis, SearchReceipt
+from ..ports.clock import Sleeper
 from ..ports.collection import SearchCollectionRequest, SearchCollector
 from ..ports.output import SearchOutput
 from ..ports.repository import SearchRepository
@@ -24,6 +25,7 @@ class SearchRequest:
     limit: int = 20
     window_days: int = 0
     batch_size: int = 0
+    pause_between_batches_sec: int = 0
     ranking_weights: dict[str, float] | None = None
 
 
@@ -33,10 +35,12 @@ class SearchContents:
         collector: SearchCollector,
         repository: SearchRepository,
         output: SearchOutput,
+        sleeper: Sleeper | None = None,
     ):
         self.collector = collector
         self.repository = repository
         self.output = output
+        self.sleeper = sleeper
 
     def execute(self, request: SearchRequest) -> SearchReceipt:
         keywords = expand_keywords(request.keywords, request.synonyms)
@@ -61,12 +65,13 @@ class SearchContents:
             for keyword in keywords
         )
         batch_size = request.batch_size if request.batch_size > 0 else len(requests)
+        batch_count = (len(requests) + batch_size - 1) // batch_size
         for offset in range(0, len(requests), batch_size):
             batch = requests[offset : offset + batch_size]
             logger.info(
                 "搜索批次 %d/%d：%s",
                 offset // batch_size + 1,
-                (len(requests) + batch_size - 1) // batch_size,
+                batch_count,
                 "、".join(item.keyword for item in batch),
             )
             for result in self.collector.collect_search_batch(batch):
@@ -103,6 +108,17 @@ class SearchContents:
             if stopped:
                 logger.error("检测到平台风险信号：停止后续关键词批次，不自动重试")
                 break
+            batch_number = offset // batch_size + 1
+            if batch_number < batch_count and request.pause_between_batches_sec > 0:
+                if self.sleeper is None:
+                    raise RuntimeError("配置了搜索批次暂停，但未注入 Sleeper")
+                logger.info(
+                    "搜索批次 %d/%d 完成：暂停 %d 秒后继续",
+                    batch_number,
+                    batch_count,
+                    request.pause_between_batches_sec,
+                )
+                self.sleeper.sleep(request.pause_between_batches_sec)
 
         creators_by_id: dict = {}
         contents_by_id: dict = {}

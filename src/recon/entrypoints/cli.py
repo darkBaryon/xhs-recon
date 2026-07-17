@@ -93,6 +93,7 @@ def search(
                 limit=loaded.run.search.limit,
                 window_days=loaded.run.search.window_days,
                 batch_size=loaded.run.search.batch_size,
+                pause_between_batches_sec=loaded.run.search.pause_between_batches_sec,
                 ranking_weights=loaded.run.ranking.weights,
             )
         )
@@ -133,6 +134,7 @@ def research(
                     limit=run.search.limit,
                     window_days=run.search.window_days,
                     batch_size=run.search.batch_size,
+                    pause_between_batches_sec=run.search.pause_between_batches_sec,
                     ranking_weights=run.ranking.weights,
                 ),
                 manual_targets=watchlist_config.targets,

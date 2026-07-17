@@ -82,7 +82,32 @@ class SearchFilesOutput:
             ),
         }
         report = self.run_dir / "search_report.md"
-        lines = ["# 关键词搜索", "", "关键词：" + "、".join(analysis.keywords), ""]
+        relation_count = sum(len(collection.contents) for collection in analysis.collections)
+        failed = [collection for collection in analysis.collections if collection.failures]
+        lines = [
+            "# 关键词搜索",
+            "",
+            "## 摘要",
+            "",
+            f"- 配置关键词：{len(analysis.keywords)}",
+            f"- 完成关键词：{len(analysis.collections) - len(failed)}",
+            f"- 失败关键词：{len(failed)}",
+            f"- 去重帖子：{len(analysis.contents)}",
+            f"- 账号：{len(analysis.creators)}",
+            f"- 关键词关系：{relation_count}",
+            "",
+            "## 关键词覆盖",
+            "",
+            "| 关键词 | 帖子 | 账号 | 状态 |",
+            "|---|---:|---:|---|",
+        ]
+        lines.extend(
+            f"| {collection.keyword} | {len(collection.contents)} | "
+            f"{len(collection.creators)} | "
+            f"{'失败：' + collection.failures[0].message if collection.failures else '完成'} |"
+            for collection in analysis.collections
+        )
+        lines.extend(["", "## 账号候选", ""])
         lines.extend(
             f"- {rank.nickname or rank.creator_id.external_id}："
             f"{rank.content_count} 篇，命中 {rank.keyword_count} 个关键词，得分 {rank.score:.2f}"

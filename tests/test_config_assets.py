@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from src.recon.entrypoints.config import (
+    load_account_config,
     load_search_config,
     load_watchlist_config,
 )
@@ -156,3 +157,35 @@ def test_watchlist_file_manual_object_loads_nickname(tmp_path):
     assert target.id.external_id == "601d0481000000000101cc46"
     assert target.nickname == "手写昵称"
     assert target.source == "manual"
+
+
+def test_ap_alevel_discovery_config_has_bounded_batches():
+    loaded = load_search_config("configs/AP-ALevel/discovery-hot.yaml")
+
+    assert len(loaded.keywords) == 18
+    assert loaded.run.search.limit == 10
+    assert loaded.run.search.batch_size == 6
+    assert loaded.run.search.pause_between_batches_sec == 300
+
+
+def test_ap_alevel_account_candidates_are_bounded_and_list_only():
+    loaded = load_account_config("configs/AP-ALevel/account-discovery.yaml")
+
+    assert len(loaded.targets) == 24
+    assert loaded.run.account_analysis.max_notes == 5
+    assert not loaded.run.account_analysis.fetch_comments
+    assert not loaded.run.account_analysis.download_images
+
+
+def test_ap_alevel_pending_discovery_only_retries_the_gap():
+    loaded = load_search_config("configs/AP-ALevel/discovery-pending.yaml")
+
+    assert loaded.keywords == (
+        "Edexcel A-Level",
+        "A-Level数学",
+        "A-Level物理",
+        "国际课程辅导",
+        "国际课程一对一",
+    )
+    assert loaded.run.search.batch_size == 2
+    assert loaded.run.search.pause_between_batches_sec == 300

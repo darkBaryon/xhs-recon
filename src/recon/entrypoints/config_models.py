@@ -11,6 +11,7 @@ class SearchConfig(BaseModel):
     sort: str = ""
     window_days: int = 0
     batch_size: int = 0
+    pause_between_batches_sec: int = Field(default=0, ge=0)
 
 
 class RankingConfig(BaseModel):

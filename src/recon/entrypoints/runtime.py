@@ -1,6 +1,7 @@
 """新入口的时间源与采集适配器组装。"""
 
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,6 +9,11 @@ from src.adapters.fixture_adapter import FixtureAdapter
 from src.adapters.mediacrawler_adapter import MediaCrawlerAdapter
 
 from .config_models import RunConfig
+
+
+class SystemSleeper:
+    def sleep(self, seconds: int) -> None:
+        time.sleep(seconds)
 
 
 def now_iso() -> str:

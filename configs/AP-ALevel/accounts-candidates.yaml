@@ -1,0 +1,32 @@
+# 第一阶段列表发现生成的第二阶段候选账号。
+# 选择依据：跨关键词重复、明确领域身份、机构/教师/学生内容类型的覆盖；不是单纯按点赞排序。
+accounts:
+  # 跨关键词与内容型账号
+  - { account_id: 68747a0c000000001b01bb4c, nickname: 隐匿芸间 }
+  - { account_id: 61ed59420000000021026593, nickname: AP回易版 }
+  - { account_id: 65f6d017000000000d025ee8, nickname: 惟才AP留学备考 }
+  - { account_id: 62df65e0000000001f0179df, nickname: 厚朴优学ALevel }
+  - { account_id: 63f522a8000000000f010b30, nickname: 浩元留学 }
+  - { account_id: 6a0d8d090000000002001406, nickname: 跟着siri去访校 }
+  - { account_id: 61df7d14000000002102037f, nickname: 洋葱卷 }
+  - { account_id: 6289a40c0000000021026927, nickname: Ruthhh }
+
+  # 机构与课程供给
+  - { account_id: 5e0436300000000001004991, nickname: 必益教育国际课程 }
+  - { account_id: 667e2eb80000000003032412, nickname: 翰林教育课程辅导 }
+  - { account_id: 593b3f695e87e7102cd607de, nickname: 渊学通国际课程 }
+  - { account_id: 62b06ef2000000001b027ddd, nickname: 唯寻留学ALevel（西安） }
+  - { account_id: 67f8b1ee00000000080169b9, nickname: 易珈易国际教育联盟 }
+  - { account_id: 63e1dbe5000000002702b72e, nickname: 渊学通国际教育-大湾区 }
+  - { account_id: 67dbb712000000000d00bccf, nickname: Starr Edu星焕国际教育 }
+  - { account_id: 68f716f600000000370056eb, nickname: 学点新思国际学科 }
+  - { account_id: 5ef08f45000000000100106e, nickname: 青藤AP }
+  - { account_id: 682af08b000000000a03ffcf, nickname: 智海骑鲸教育 }
+
+  # 教师与学科垂类
+  - { account_id: 5ff1f1a60000000001009390, nickname: 国际数学Alex大山老师 }
+  - { account_id: 695ccaed000000002b01fa04, nickname: Alevel经济老师 }
+  - { account_id: 68ea14670000000032027e37, nickname: Verdi老师教物化 }
+  - { account_id: 65dda4f50000000005008234, nickname: AP生物学 }
+  - { account_id: 67f32c64000000000e01c61b, nickname: AP逐录社 }
+  - { account_id: 67c9b1ef000000000a03d575, nickname: Alevel一张图看懂 }

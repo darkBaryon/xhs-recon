@@ -564,7 +564,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
         for keyword in keywords:
             notes, accounts = buckets[keyword]
             error_parts = []
-            if risk_error:
+            # 风险发生前已经完整落盘的关键词可安全保留；没有结果的当前/后续
+            # 关键词携带熔断错误，application 据此停止下一批。
+            if risk_error and not notes:
                 error_parts.append(risk_error)
             if run_error:
                 error_parts.append(run_error)

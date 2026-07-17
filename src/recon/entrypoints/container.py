@@ -96,7 +96,15 @@ def build_search_use_case(config: LoadedSearchConfig, collected_at: str, *, verb
     )
     run_name = runtime.compact_run_id(collected_at) + "-search"
     output = SearchFilesOutput(Path(run.export.out_dir), run_name)
-    return SearchContents(registry.search_collector("xhs"), repository, output), repository
+    return (
+        SearchContents(
+            registry.search_collector("xhs"),
+            repository,
+            output,
+            runtime.SystemSleeper(),
+        ),
+        repository,
+    )
 
 
 def build_watchlist_use_case(config: LoadedWatchlistConfig, collected_at: str, *, verbose: bool):

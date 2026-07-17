@@ -43,6 +43,11 @@ def test_search_cli_uses_yaml_and_keeps_keyword_ownership(tmp_path, monkeypatch)
         "search_accounts.csv",
         "search_report.md",
     }
+    report = (latest / "search_report.md").read_text(encoding="utf-8")
+    assert "## 摘要" in report
+    assert "- 配置关键词：2" in report
+    assert "## 关键词覆盖" in report
+    assert "| 留学辅导 | 2 | 2 | 完成 |" in report
     log_text = next(logs.glob("run-*.log")).read_text(encoding="utf-8")
     assert "关键词搜索开始" in log_text
     assert "归属已保存" in log_text

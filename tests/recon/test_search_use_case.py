@@ -98,3 +98,24 @@ def test_search_stops_future_batches_after_risk_signal():
     )
 
     assert collector.batches == [("AP课程",)]
+
+
+def test_search_pauses_only_between_batches():
+    class Sleeper:
+        def __init__(self):
+            self.calls = []
+
+        def sleep(self, seconds):
+            self.calls.append(seconds)
+
+    sleeper = Sleeper()
+    SearchContents(Collector(), Repository(), Output(), sleeper).execute(
+        SearchRequest(
+            keywords=("AP课程", "AP选课", "AP备考"),
+            collected_at="2026-07-18T00:00:00+08:00",
+            batch_size=2,
+            pause_between_batches_sec=300,
+        )
+    )
+
+    assert sleeper.calls == [300]
