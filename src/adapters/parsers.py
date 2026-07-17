@@ -5,7 +5,7 @@
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from src.models import Account, Comment, CreatorProfile, Note
@@ -62,6 +62,42 @@ def epoch_ms_to_iso(ms) -> str:
         return ""
 
 
+def card_time_to_iso(raw_ms, text: str, collected_at: str) -> str:
+    """Turn the date label visible on a search card into an ISO timestamp."""
+    exact = epoch_ms_to_iso(raw_ms) if raw_ms not in (None, "", 0, "0") else ""
+    if exact:
+        return exact
+    label = str(text or "").strip()
+    try:
+        collected = datetime.fromisoformat(collected_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if label == "昨天":
+        return (collected - timedelta(days=1)).isoformat()
+    if label == "前天":
+        return (collected - timedelta(days=2)).isoformat()
+    days_ago = re.fullmatch(r"(\d+)天前", label)
+    if days_ago:
+        return (collected - timedelta(days=int(days_ago.group(1)))).isoformat()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            parsed = datetime.strptime(label, fmt)
+            return parsed.replace(tzinfo=collected.tzinfo).isoformat()
+        except ValueError:
+            pass
+    for fmt in ("%m-%d", "%m/%d"):
+        try:
+            parsed = datetime.strptime(label, fmt).replace(
+                year=collected.year, tzinfo=collected.tzinfo
+            )
+        except ValueError:
+            continue
+        if parsed > collected:
+            parsed = parsed.replace(year=collected.year - 1)
+        return parsed.isoformat()
+    return ""
+
+
 def _row_keyword(row: dict, fallback: str) -> str:
     return row.get("source_keyword") or fallback
 
@@ -78,7 +114,9 @@ def parse_note(row: dict, *, keyword: str, collected_at: str, raw_path: str) -> 
         like_count=normalize_count(row.get("liked_count")),
         collect_count=normalize_count(row.get("collected_count")),
         comment_count=normalize_count(row.get("comment_count")),
-        published_at=epoch_ms_to_iso(row.get("time")),
+        published_at=card_time_to_iso(
+            row.get("time"), row.get("publish_time_text", ""), collected_at
+        ),
         collected_at=collected_at,
         source_keywords=[kw] if kw else [],
         raw_path=raw_path,

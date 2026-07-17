@@ -44,6 +44,13 @@ _RE_NOTE_COMMENTS_DONE = re.compile(r"Sleeping for .+ after fetching comments fo
 # store 层每存一条评论打一行：评论段篇内耗时长（子评论翻页），用累计条数证明没卡死
 _RE_COMMENT_SAVED = re.compile(r"store\.xhs\.update_xhs_note_comment\]")
 _RE_NOTE_DETAIL_FAILED = re.compile(r"Failed to get note detail,\s*(?:Id|note_id):\s*([^,\s]+)")
+_RISK_MARKERS = (
+    "CAPTCHA appeared",
+    "IPBlockError",
+    "触发验证码",
+    "被风控",
+    "abort search session",
+)
 
 
 def _safe_dirname(s: str) -> str:
@@ -60,6 +67,18 @@ def _summarize_crawler_failure(output: str) -> str:
     if matches:
         return matches[-1].strip()
     return output[-300:]
+
+
+def _risk_failure_summary(output: str) -> str | None:
+    """Return a stop reason only for risk/login signals, never for ordinary bad rows."""
+    if "登录已过期" in output:
+        return "登录已过期，采集已熔断"
+    if any(marker in output for marker in _RISK_MARKERS):
+        summary = _summarize_crawler_failure(output)
+        if summary.startswith("触发验证码/风控"):
+            return summary
+        return f"检测到平台风险信号，采集已熔断：{summary}"
+    return None
 
 
 class MediaCrawlerAdapter(ResearchAdapter):
@@ -110,6 +129,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self.launcher = launcher or ["uv", "run", "python"]
         # 进度事件回调（pipeline 可选注入，见 fetch_creator_notes）；None = 不上报
         self.on_progress: ProgressCallback | None = None
+        # 同一业务运行会连续调用多个账号/详情批次；MediaCrawler 的 JSONL 是追加写，
+        # 每次调用必须落独立目录，否则后批会读回前批数据。
+        self._session_counter = 0
 
     def _save_path(self, collected_at: str) -> Path:
         # 每次 run 用唯一子目录隔离 MediaCrawler 的同日追加写
@@ -124,6 +146,11 @@ class MediaCrawlerAdapter(ResearchAdapter):
 
     def _search_session_save_path(self, collected_at: str) -> Path:
         return self._save_path(collected_at) / "search"
+
+    def _isolated_save_path(self, collected_at: str, operation: str, identities: list[str]) -> Path:
+        self._session_counter += 1
+        digest = hashlib.sha256("\0".join(identities).encode("utf-8")).hexdigest()[:8]
+        return self._save_path(collected_at) / f"{operation}-{self._session_counter:03d}-{digest}"
 
     def _base_command(self, save_path: Path) -> list[str]:
         """三种会话（search/detail/creator）共享的启动与合规 flag。
@@ -170,6 +197,10 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "no",
             "--get_sub_comment",
             "no",
+            # 搜索是发现接口：列表卡片已含标题、作者和互动数。禁止逐帖详情，
+            # 避免 1 次列表请求被放大成 N 次 API/HTML 请求。
+            "--list_only",
+            "yes",
             "--crawler_max_notes_count",
             str(crawler_max_notes),
             "--start",
@@ -199,20 +230,24 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return self._append_cookies(cmd)
 
     def _build_creator_command(
-        self, account_ids: list[str], limit: int, save_path: Path
+        self,
+        account_ids: list[str],
+        limit: int,
+        save_path: Path,
+        with_comments: bool = True,
     ) -> list[str]:
         # 单会话多账号:--creator_id 接受逗号分隔列表，MC 在一次会话里顺序拉完
         # （省掉逐账号的浏览器启动开销）；单并发与 sleep 间隔来自 _base_command，速率不放大。
-        # 全量采集：creator 同会话带回每篇笔记的一级+二级评论（省掉单独 comments 命令）。
+        # watchlist 可带回评论；account analysis 默认关闭，省请求。
         cmd = self._base_command(save_path) + [
             "--type",
             "creator",
             "--creator_id",
             ",".join(account_ids),
             "--get_comment",
-            "yes",
+            "yes" if with_comments else "no",
             "--get_sub_comment",
-            "yes",
+            "yes" if with_comments else "no",
             "--max_comments_count_singlenotes",
             str(self._COMMENTS_PER_NOTE_CAP),
             "--crawler_max_notes_count",
@@ -296,6 +331,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         self, save_path: Path, keyword: str, collected_at: str
     ) -> tuple[list[Note], list[Account]]:
         lines = self._read_jsonl(save_path, "xhs/jsonl/search_contents_*.jsonl")
+        if not lines:
+            lines = self._read_jsonl(save_path, "xhs/jsonl/search_notelist_*.jsonl")
         return parse_jsonl_lines(
             lines, keyword=keyword, collected_at=collected_at, raw_path=str(save_path)
         )
@@ -390,6 +427,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
         except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as e:
             return self._err(keyword, page, collected_at, cmd, f"run failed: {e}")
         self._write_crawler_log(save_path, out)
+        risk_error = _risk_failure_summary(out)
+        if risk_error:
+            return self._err(keyword, page, collected_at, cmd, risk_error, save_path)
         if rc != 0:
             logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
             return self._err(
@@ -503,6 +543,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         if rc not in (0, None):
             logger.warning("MediaCrawler 退出码 %d，完整日志：%s", rc, save_path)
 
+        risk_error = _risk_failure_summary(out)
+
         try:
             buckets = self._read_search_results_by_keyword(save_path, keywords, collected_at)
         except (OSError, ValueError) as e:
@@ -522,6 +564,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         for keyword in keywords:
             notes, accounts = buckets[keyword]
             error_parts = []
+            if risk_error:
+                error_parts.append(risk_error)
             if run_error:
                 error_parts.append(run_error)
             if rc not in (0, None) and not notes:
@@ -662,12 +706,18 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return handle
 
     def fetch_creator_notes(
-        self, account_ids: list[str], limit: int, collected_at: str
+        self,
+        account_ids: list[str],
+        limit: int,
+        collected_at: str,
+        with_comments: bool = True,
     ) -> FetchResult:
         # 单会话：全部账号一次子进程，MC 会话内顺序拉完（省 N-1 次浏览器启动）；
         # 合并落盘（一个 save_path），notes/profiles 各行自带 user_id 可区分。
         save_path = self._save_path(collected_at) / "creator"
-        cmd = self._build_creator_command(account_ids, limit, save_path)
+        cmd = self._build_creator_command(
+            account_ids, limit, save_path, with_comments=with_comments
+        )
         # 超时按账号数缩放：一个会话拉 N 账号，固定 600s 对大 watchlist 不够
         session_timeout = self._session_budget(self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
         t0 = perf_counter()
@@ -699,7 +749,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
             notes, accounts = self._read_creator_results(save_path, collected_at)
             profiles = self._read_creator_profiles(save_path, collected_at)
             # 全量：同会话带回的评论也一并读出（get_comment=yes 落在 *_comments_*.jsonl）
-            comments = self._read_comments(save_path, collected_at)
+            if with_comments:
+                comments = self._read_comments(save_path, collected_at)
             # 全量：把下载的原图从 raw 提升到持久 media 库，image_paths 存 media 绝对路径
             self._promote_images(notes, save_path)
         except (OSError, ValueError) as e:
@@ -740,7 +791,9 @@ class MediaCrawlerAdapter(ResearchAdapter):
         )
 
     # ---- 两段式增量：列表 → 库 diff → 只抓新帖详情 ----
-    def _build_list_command(self, account_ids: list[str], save_path: Path) -> list[str]:
+    def _build_list_command(
+        self, account_ids: list[str], save_path: Path, limit: int | None = None
+    ) -> list[str]:
         # creator + --list_only：只拉主页 note 列表（id/token/卡片计数），跳详情/评论/图
         cmd = self._base_command(save_path) + [
             "--type",
@@ -750,7 +803,7 @@ class MediaCrawlerAdapter(ResearchAdapter):
             "--list_only",
             "yes",
             "--crawler_max_notes_count",
-            str(self.max_notes),
+            str(limit if limit is not None else self.max_notes),
         ]
         return self._append_cookies(cmd)
 
@@ -767,11 +820,11 @@ class MediaCrawlerAdapter(ResearchAdapter):
         return cards
 
     def list_creator_notes(
-        self, account_ids: list[str], collected_at: str
+        self, account_ids: list[str], collected_at: str, limit: int | None = None
     ) -> tuple[list[dict], list[CreatorProfile]]:
         """列表模式：只拉 note 卡片（id/token/计数）+ 创作者档案，不抓详情。省请求的大头。"""
-        save_path = self._save_path(collected_at) / "creator-list"
-        cmd = self._build_list_command(account_ids, save_path)
+        save_path = self._isolated_save_path(collected_at, "creator-list", account_ids)
+        cmd = self._build_list_command(account_ids, save_path, limit)
         timeout = self._session_budget(self._CREATOR_PER_ACCOUNT_SEC * len(account_ids))
         try:
             _rc, out = self._run_crawler(cmd, timeout=timeout)
@@ -843,7 +896,8 @@ class MediaCrawlerAdapter(ResearchAdapter):
         """详情模式：对给定卡片（新帖）抓 正文 + 一级/二级评论 + 图片，图提升到 media 库。
 
         with_comments=False = 只补正文/图（评论段是大头，补图回填用它省时且少打评论接口）。"""
-        save_path = self._save_path(collected_at) / "detail"
+        note_ids = [str(card.get("note_id") or "") for card in cards]
+        save_path = self._isolated_save_path(collected_at, "detail", note_ids)
         urls = [self._card_note_url(c) for c in cards if c.get("note_id")]
         cmd = self._build_detail_command(urls, save_path, with_comments=with_comments)
         timeout = self._session_budget(self._COMMENT_PER_NOTE_SEC * max(len(urls), 1))

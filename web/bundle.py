@@ -15,7 +15,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from src.core.keyword_expander import expand_keywords
+from src.recon.domain.policies.keywords import expand_keywords
 
 PIPE = "|"
 

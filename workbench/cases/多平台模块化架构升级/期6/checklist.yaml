@@ -1,0 +1,27 @@
+# 多平台模块化架构升级 期6：采集能力 Port 收敛与批量会话恢复
+必过命令:
+  - { name: lint, run: "uv run ruff check src tests scripts web" }
+  - { name: format, run: "uv run ruff format --check src tests scripts web" }
+  - { name: 全量测试, run: "uv run pytest -q" }
+  - { name: 批量会话, run: "uv run pytest -q tests/recon/test_xhs_watchlist_collector.py tests/recon/test_watchlist_use_case.py" }
+  - { name: 架构与能力, run: "uv run pytest -q tests/recon/architecture/test_dependencies.py tests/recon/test_platform_capabilities.py tests/recon/test_search_only_platform_contract.py" }
+  - { name: 用户运行配置保持, run: "test \"$(shasum -a 256 'configs/留学辅导/run.yaml' | awk '{print $1}')\" = '3d6d883b523fd27e5acc5a95d39e5bb981d87453ef7ffe82c349ba325ae4859f'" }
+  - { name: 工作台视图, run: "python3 workbench/tools/build_views.py --check" }
+
+必存产物:
+  - src/recon/application/ports/collection.py
+  - src/recon/platforms/xhs/collector.py
+  - src/recon/platforms/xhs/details.py
+  - tests/recon/test_xhs_watchlist_collector.py
+
+必含符号:
+  - { grep: "class SearchCollector", in: "src/recon/application/ports/collection.py" }
+  - { grep: "class CreatorFeedCollector", in: "src/recon/application/ports/collection.py" }
+  - { grep: "class ContentDetailCollector", in: "src/recon/application/ports/collection.py" }
+  - { grep: "collect_creator_feeds", in: "src/recon/application/watchlist/use_case.py" }
+  - { grep: "collect_content_details", in: "src/recon/application/watchlist/use_case.py" }
+
+禁留标记:
+  - { grep: "class AccountCollector", in: "src/recon" }
+  - { grep: "class WatchlistCollector", in: "src/recon" }
+  - { grep: "list_creator_notes([account_id]", in: "src/recon" }

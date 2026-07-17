@@ -12,8 +12,5 @@ venv/
 # 工作台生成的站点（HTML 产物，源在 *.md）
 workbench/site/
 
-# 管线运行时产物（采集 raw / 中间结果 / 导出，不入库）
-data/raw/
-data/processed/
-data/exports/
-data/logs/
+# 管线运行时产物（采集 raw / 媒体 / 数据库导出 / 站点，不入库）
+data/

@@ -1,0 +1,41 @@
+# 冷启动完成后的日常配置：近期内容优先。watchlist 在首轮搜索筛选账号后补入。
+provider: mediacrawler
+mediacrawler_dir: ../MediaCrawler
+mediacrawler:
+  login_type: qrcode
+  cookies: ""
+  out_dir: data/raw
+  timeout: 900
+  max_concurrency: 1
+  sleep_sec: 10.0
+  download_images: false
+
+keywords_file: configs/AP-ALevel/keywords.yaml
+search:
+  pages: 1
+  limit: 3
+  sort: time_descending
+  window_days: 90
+  batch_size: 4
+ranking:
+  weights:
+    note_count: 10
+    keyword_hit: 5
+    interaction: 0.01
+
+creator:
+  notes_per_account: 3
+  batch_size: 1
+  refresh_days: 14
+comments:
+  enabled: false
+  refresh_days: 0
+logging:
+  level: info
+  dir: data/logs
+  file_enabled: true
+export:
+  out_dir: data/exports/ap-alevel
+store:
+  enabled: true
+  database: xhs_recon

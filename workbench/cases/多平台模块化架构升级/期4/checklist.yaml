@@ -1,0 +1,37 @@
+# 多平台模块化架构升级 期4：迁移与消费面切换
+必过命令:
+  - { name: lint, run: "uv run ruff check src tests web" }
+  - { name: 全量测试, run: "uv run pytest -q" }
+  - { name: legacy import, run: "uv run pytest -q tests/recon/test_legacy_import.py tests/recon/test_migrate_cli.py" }
+  - { name: 新库 Web 投影, run: "uv run pytest -q tests/recon/test_feed_query.py tests/test_web_feed.py" }
+  - { name: 新 research bundle, run: "uv run pytest -q tests/recon/test_research_use_case.py tests/recon/test_research_e2e.py tests/recon/test_consumer_cli.py" }
+  - { name: 新 backfill, run: "uv run pytest -q tests/recon/test_backfill.py" }
+  - { name: watchlist 轮转与入口切换, run: "uv run pytest -q tests/recon/test_watchlist_e2e.py tests/recon/test_mysql_account_repository.py && bash -n run.sh" }
+  - { name: MediaCrawler 批次隔离, run: "uv run pytest -q tests/test_mediacrawler_adapter.py" }
+  - { name: Web bundle 契约, run: "uv run pytest -q tests/test_web_feed.py tests/test_web_bundle.py" }
+  - { name: 用户运行配置保持, run: "test \"$(shasum -a 256 'configs/留学辅导/run.yaml' | awk '{print $1}')\" = '3d6d883b523fd27e5acc5a95d39e5bb981d87453ef7ffe82c349ba325ae4859f'" }
+  - { name: 工作台视图, run: "python3 workbench/tools/build_views.py --check" }
+
+必存产物:
+  - src/recon/infrastructure/persistence/mysql/legacy_import.py
+  - tests/recon/test_legacy_import.py
+  - tests/recon/test_migrate_cli.py
+  - src/recon/infrastructure/query/feed.py
+  - tests/recon/test_feed_query.py
+  - src/recon/application/research/use_case.py
+  - src/recon/infrastructure/output/bundle.py
+  - tests/recon/test_research_e2e.py
+  - src/recon/application/backfill/use_case.py
+  - src/recon/platforms/xhs/details.py
+  - tests/recon/test_backfill.py
+
+必含符号:
+  - { grep: "class LegacyImporter", in: "src/recon/infrastructure/persistence/mysql" }
+  - { grep: "def migrate_legacy", in: "src/recon/entrypoints/cli.py" }
+  - { grep: "dry_run", in: "src/recon/infrastructure/persistence/mysql/legacy_import.py" }
+  - { grep: "src.recon.entrypoints.cli", in: "run.sh" }
+
+禁留标记:
+  - { grep: "DROP TABLE", in: "src/recon/infrastructure/persistence/mysql/legacy_import.py" }
+  - { grep: "collection_runs", in: "src/recon" }
+  - { grep: "src.pipelines.cli", in: "run.sh" }

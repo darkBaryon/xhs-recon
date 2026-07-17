@@ -1,0 +1,35 @@
+# 多平台模块化架构升级 期1：配置驱动账号分析
+必过命令:
+  - { name: lint, run: "uv run ruff check src tests web" }
+  - { name: 全量测试, run: "uv run pytest -q" }
+  - { name: account fixture E2E, run: "uv run pytest -q tests/recon/test_account_e2e.py" }
+  - { name: MySQL 幂等与事务, run: "uv run pytest -q tests/recon/test_mysql_account_repository.py" }
+  - { name: 架构禁线, run: "uv run pytest -q tests/recon/architecture" }
+  - { name: 用户运行配置保持, run: "test \"$(shasum -a 256 'configs/留学辅导/run.yaml' | awk '{print $1}')\" = '3d6d883b523fd27e5acc5a95d39e5bb981d87453ef7ffe82c349ba325ae4859f'" }
+  - { name: 工作台视图, run: "python3 workbench/tools/build_views.py --check" }
+
+必存产物:
+  - src/recon/domain/identity.py
+  - src/recon/domain/content.py
+  - src/recon/application/ports/collection.py
+  - src/recon/application/account/use_case.py
+  - src/recon/platforms/registry.py
+  - src/recon/platforms/xhs/collector.py
+  - src/recon/infrastructure/persistence/mysql/repository.py
+  - src/recon/infrastructure/output/account_files.py
+  - src/recon/entrypoints/config.py
+  - src/recon/entrypoints/cli.py
+  - configs/recon/account.sample.yaml
+  - tests/recon/test_account_e2e.py
+
+必含符号:
+  - { grep: "class PlatformId", in: "src/recon/domain" }
+  - { grep: "class AccountCollector", in: "src/recon/application/ports" }
+  - { grep: "class AnalyzeAccounts", in: "src/recon/application/account" }
+  - { grep: "class XhsAccountCollector", in: "src/recon/platforms/xhs" }
+  - { grep: "def account", in: "src/recon/entrypoints/cli.py" }
+
+禁留标记:
+  - { grep: "collection_runs", in: "src/recon" }
+  - { grep: "change_log", in: "src/recon" }
+  - { grep: "recovery_bundle", in: "src/recon" }

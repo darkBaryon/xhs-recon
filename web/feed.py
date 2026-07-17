@@ -141,3 +141,31 @@ def build_feed(site_dir: Path, database: str = "xhs_recon") -> Path:
     for name in _STATIC_ASSETS:
         shutil.copy(_WEB_DIR / name, site_dir / name)
     return site_dir / "index.html"
+
+
+def build_recon_feed(
+    site_dir: Path, database: str = "xhs_recon", keyword: str | None = None
+) -> Path:
+    """显式读取候选新 schema；默认 Web 入口在正式切换前仍走旧表。"""
+    import pymysql
+
+    from src.recon.infrastructure.query.feed import ResearchFeedQuery
+
+    site_dir = Path(site_dir)
+    site_dir.mkdir(parents=True, exist_ok=True)
+    conn = pymysql.connect(
+        read_default_file=str(Path("~/.my.cnf").expanduser()),
+        database=database,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+    try:
+        note_rows, comment_rows, profile_rows = ResearchFeedQuery(conn).read(keyword)
+    finally:
+        conn.close()
+    payload = assemble(note_rows, comment_rows, profile_rows, site_dir)
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    (site_dir / "data.js").write_text(f"window.FEED_DATA = {data};", encoding="utf-8")
+    for name in _STATIC_ASSETS:
+        shutil.copy(_WEB_DIR / name, site_dir / name)
+    return site_dir / "index.html"

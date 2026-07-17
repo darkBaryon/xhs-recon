@@ -94,7 +94,11 @@ class FixtureAdapter(ResearchAdapter):
         )
 
     def fetch_creator_notes(
-        self, account_ids: list[str], limit: int, collected_at: str
+        self,
+        account_ids: list[str],
+        limit: int,
+        collected_at: str,
+        with_comments: bool = True,
     ) -> FetchResult:
         if self._creator_path is None:
             raise NotImplementedError
@@ -131,7 +135,7 @@ class FixtureAdapter(ResearchAdapter):
         profiles = self._read_creator_profiles(wanted, collected_at)
         # 全量采集：评论随 creator 笔记一同带回（真实 adapter 同会话抓，夹具从 comments_path 读）
         comments = []
-        if self._comments_path is not None:
+        if with_comments and self._comments_path is not None:
             try:
                 ctext = self._comments_path.read_text(encoding="utf-8")
                 comments = parse_comments_jsonl_lines(ctext.splitlines(), collected_at=collected_at)
@@ -177,9 +181,20 @@ class FixtureAdapter(ResearchAdapter):
         pairs = [(n, a) for n, a in zip(notes, accounts, strict=True) if n.account_id in wanted]
         return [n for n, _ in pairs], [a for _, a in pairs]
 
-    def list_creator_notes(self, account_ids: list[str], collected_at: str):
+    def list_creator_notes(
+        self, account_ids: list[str], collected_at: str, limit: int | None = None
+    ):
         """列表模式替身：从 creator 夹具派生卡片（note_id + 计数）+ 档案。"""
         notes, _ = self._creator_notes_for(account_ids, collected_at)
+        if limit:
+            counts: dict[str, int] = {}
+            limited = []
+            for note in notes:
+                if counts.get(note.account_id, 0) >= limit:
+                    continue
+                counts[note.account_id] = counts.get(note.account_id, 0) + 1
+                limited.append(note)
+            notes = limited
         cards = [
             {
                 "note_id": n.note_id,
@@ -193,14 +208,16 @@ class FixtureAdapter(ResearchAdapter):
         profiles = self._read_creator_profiles(set(account_ids), collected_at)
         return cards, profiles
 
-    def fetch_note_details(self, cards: list[dict], collected_at: str) -> FetchResult:
+    def fetch_note_details(
+        self, cards: list[dict], collected_at: str, with_comments: bool = True
+    ) -> FetchResult:
         """详情模式替身：对给定卡片 id 出笔记全字段 + 评论（从 comments 夹具）。"""
         want = {c.get("note_id") for c in cards}
         acct_ids = list({c.get("user_id") for c in cards if c.get("user_id")})
         notes, accounts = self._creator_notes_for(acct_ids, collected_at)
         notes = [n for n in notes if n.note_id in want]
         comments = []
-        if self._comments_path is not None:
+        if with_comments and self._comments_path is not None:
             try:
                 comments = parse_comments_jsonl_lines(
                     self._comments_path.read_text(encoding="utf-8").splitlines(),

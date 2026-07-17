@@ -1,0 +1,18 @@
+provider: fixture
+fixture_path: tests/fixtures/search_contents_sample.jsonl
+creator_fixture_path: tests/fixtures/creator_contents_sample.jsonl
+creator_profiles_fixture_path: tests/fixtures/creator_creators_sample.jsonl
+
+account_analysis:
+  accounts:
+    - account_id: 601d0481000000000101cc46
+      nickname: 样例竞品
+  max_notes: null
+  fetch_comments: false
+
+logging:
+  file_enabled: false
+export:
+  out_dir: data/recon/exports
+store:
+  enabled: false

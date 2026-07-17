@@ -17,6 +17,7 @@
 """
 import json
 import posixpath
+import re
 import sys
 from pathlib import Path
 
@@ -128,6 +129,27 @@ def short_label(d):
     """侧栏/过程文档主页用的短标签：去掉「<简称> 期N」前缀。"""
     parts = d["title"].split(" ", 2)
     return parts[2] if len(parts) == 3 and parts[1].startswith("期") else d["title"]
+
+
+def blueprint_version(d):
+    """开发蓝图版本号：优先读标题/文件名；无显式后缀的首版视为 v1。"""
+    for value in (d.get("title", ""), Path(d.get("_path", "")).stem):
+        match = re.search(r"(?:开发)?蓝图\s*v(\d+)", value, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return 1
+
+
+def blueprint_nav_items(items):
+    """按版本排列蓝图，并给最高版本标记“当前”。"""
+    blueprints = sorted(
+        (d for d in items if d["type"] == "开发蓝图"),
+        key=lambda d: (blueprint_version(d), d["_path"]),
+    )
+    return [
+        (f"蓝图 v{blueprint_version(d)}" + ("（当前）" if i == len(blueprints) - 1 else ""), d)
+        for i, d in enumerate(blueprints)
+    ]
 
 
 def doc_sort_key(d):
@@ -306,8 +328,7 @@ def nav_model(docs, cases):
     case_nodes = []
     for case, items in sorted(cases.items()):
         children = [page("主页", f"cases/{case}/index.md")]
-        children += [page("蓝图", bp["_path"])
-                     for bp in items if bp["type"] == "开发蓝图"]
+        children += [page(label, bp["_path"]) for label, bp in blueprint_nav_items(items)]
         phases = {}
         for d in items:
             if d["type"] != "开发蓝图":

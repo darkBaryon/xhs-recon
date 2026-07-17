@@ -1,0 +1,37 @@
+# 多平台模块化架构升级 期5：保留成熟基础设施，删除重复业务核心
+必过命令:
+  - { name: lint, run: "uv run ruff check src tests web" }
+  - { name: 全量测试, run: "uv run pytest -q" }
+  - { name: MediaCrawler 特征与隔离, run: "uv run pytest -q tests/test_mediacrawler_adapter.py" }
+  - { name: 新架构守护, run: "uv run pytest -q tests/recon/architecture/test_dependencies.py tests/recon/test_platform_capabilities.py tests/recon/test_search_only_platform_contract.py" }
+  - { name: shell 入口, run: "bash -n run.sh && ! grep -q 'src.pipelines.cli' run.sh" }
+  - { name: 旧编排已退役, run: "test ! -e src/pipelines/cli.py && test ! -e src/pipelines/run_research.py && test ! -e src/adapters/mysql_store.py" }
+  - { name: 用户运行配置保持, run: "test \"$(shasum -a 256 'configs/留学辅导/run.yaml' | awk '{print $1}')\" = '3d6d883b523fd27e5acc5a95d39e5bb981d87453ef7ffe82c349ba325ae4859f'" }
+  - { name: 工作台视图, run: "python3 workbench/tools/build_views.py --check" }
+
+必存产物:
+  - src/recon/domain/content.py
+  - src/recon/application/search/use_case.py
+  - src/recon/application/watchlist/use_case.py
+  - src/recon/platforms/registry.py
+  - src/recon/platforms/xhs/contract.py
+  - src/recon/entrypoints/config_models.py
+  - src/recon/entrypoints/runtime.py
+  - src/recon/entrypoints/logging_setup.py
+  - src/recon/entrypoints/progress_ui.py
+  - src/adapters/mediacrawler_adapter.py
+  - tests/test_mediacrawler_adapter.py
+  - tests/recon/test_search_only_platform_contract.py
+  - tests/recon/test_domain_policies.py
+  - docs/平台接入.md
+
+必含符号:
+  - { grep: "_isolated_save_path", in: "src/adapters/mediacrawler_adapter.py" }
+  - { grep: "class PlatformRegistry", in: "src/recon/platforms/registry.py" }
+
+禁留标记:
+  - { grep: "src.pipelines.cli", in: "run.sh" }
+  - { grep: "collection_runs", in: "src/recon" }
+  - { grep: "src.pipelines", in: "src/recon" }
+  - { grep: "src.core", in: "src/recon/platforms" }
+  - { grep: "src.models", in: "src/recon/platforms" }

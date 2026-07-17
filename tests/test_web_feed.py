@@ -57,11 +57,33 @@ def test_norm_note_bad_json_fields(tmp_path):
 
 
 def test_assemble_groups_accounts_and_profiles(tmp_path):
-    rows = [_note_row(), _note_row(note_id="n2"), _note_row(note_id="n3", account_id="a2", nickname="乙")]
-    comments = [
-        {"note_id": "n1", "comment_id": "c1", "parent_comment_id": "", "body": "顶", "author_nickname": "路人", "like_count": 2, "created_at": "2026-07-02", "ip_location": "广东", "author_avatar": ""},
+    rows = [
+        _note_row(),
+        _note_row(note_id="n2"),
+        _note_row(note_id="n3", account_id="a2", nickname="乙"),
     ]
-    profiles = [{"account_id": "a1", "fans": 2847, "descr": "简介", "red_id": "123", "verify_type": 2}]
+    comments = [
+        {
+            "note_id": "n1",
+            "comment_id": "c1",
+            "parent_comment_id": "",
+            "body": "顶",
+            "author_nickname": "路人",
+            "like_count": 2,
+            "created_at": "2026-07-02",
+            "ip_location": "广东",
+            "author_avatar": "",
+        },
+    ]
+    profiles = [
+        {
+            "account_id": "a1",
+            "fans": 2847,
+            "descr": "简介",
+            "red_id": "123",
+            "verify_type": 2,
+        }
+    ]
     payload = assemble(rows, comments, profiles, tmp_path)
     assert len(payload["notes"]) == 3
     accs = {a["aid"]: a for a in payload["accounts"]}

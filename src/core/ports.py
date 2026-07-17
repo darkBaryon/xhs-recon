@@ -21,6 +21,10 @@ class ResearchAdapter(ABC):
         raise NotImplementedError
 
     def fetch_creator_notes(
-        self, account_ids: list[str], limit: int, collected_at: str
+        self,
+        account_ids: list[str],
+        limit: int,
+        collected_at: str,
+        with_comments: bool = True,
     ) -> FetchResult:
         raise NotImplementedError

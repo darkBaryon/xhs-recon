@@ -8,12 +8,11 @@
 """
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from src.pipelines.run_research import run_research  # noqa: E402
 
 
 def main() -> None:
@@ -22,20 +21,17 @@ def main() -> None:
     ap.add_argument("--verbose", "-v", action="store_true", help="输出 DEBUG 控制台日志")
     args = ap.parse_args()
     sys.stdout.write("提示：建议在 CDP / 本机已登录浏览器会话下运行，避免 detail 阶段二次扫码。\n")
-    paths = run_research(args.config, verbose=args.verbose)
-    sys.stdout.write("集成验收产出：\n")
-    for name, p in paths.items():
-        sys.stdout.write(f"  {name}: {p}\n")
-    if "comments" in paths:
-        sys.stdout.write("评论段：已产出 comments.csv，并已织入 report_input.md。\n")
-    else:
-        sys.stdout.write(
-            "评论段：未产出 comments.csv，请检查 comments.enabled、典型笔记 URL 或采集错误。\n"
-        )
-    sys.stdout.write(
-        "运行日志：data/logs/run-<run_id>.log；"
-        "MediaCrawler 原始输出见 raw 目录下 mediacrawler.log。\n"
-    )
+    command = [
+        sys.executable,
+        "-m",
+        "src.recon.entrypoints.cli",
+        "research",
+        "--config",
+        args.config,
+    ]
+    if args.verbose:
+        command.append("--verbose")
+    raise SystemExit(subprocess.run(command, check=False).returncode)
 
 
 if __name__ == "__main__":

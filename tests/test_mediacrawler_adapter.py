@@ -35,6 +35,7 @@ def test_build_command_has_compliance_flags(tmp_path):
     assert cmd[cmd.index("--crawler_max_sleep_sec") + 1] == "2.0"
     assert cmd[cmd.index("--get_comment") + 1] == "no"  # 禁评论（期2 不碰评论、不存敏感字段）
     assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
+    assert cmd[cmd.index("--list_only") + 1] == "yes"  # 搜索只保存列表卡片，不逐帖请求详情
     assert cmd[cmd.index("--keywords") + 1] == "留学辅导"
     assert cmd[cmd.index("--type") + 1] == "search"
     assert "ENABLE_CDP" not in " ".join(cmd)  # CDP 用默认，不在命令里
@@ -95,6 +96,55 @@ def test_search_success_reads_and_parses(tmp_path, monkeypatch):
     assert len(r.notes) == 5
     assert r.notes[0].like_count == 10000  # 复用期1 parsers，"1万"→10000
     assert Path(r.raw_path, "mediacrawler.log").read_text(encoding="utf-8") == "crawler stdout"
+
+
+def test_search_reads_lightweight_list_cards(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_notelist_2026.jsonl").write_text(
+            '{"note_id":"n-card","user_id":"u-card","nickname":"机构",'
+            '"title":"AP课程怎么选","liked_count":"1.2万",'
+            '"collected_count":"88","comment_count":"9",'
+            '"publish_time_text":"05-09",'
+            '"source_keyword":"AP课程","note_url":"https://example/n-card"}',
+            encoding="utf-8",
+        )
+        return 0, "list-only success"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    result = a.search("AP课程", 1, 3, "2026-07-17T00:00:00+08:00")
+
+    assert result.ok
+    assert result.notes[0].note_id == "n-card"
+    assert result.notes[0].like_count == 12000
+    assert result.notes[0].body == ""
+    assert result.notes[0].source_keywords == ["AP课程"]
+    assert result.notes[0].published_at.startswith("2026-05-09")
+
+
+def test_search_risk_signal_discards_partial_output(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        sp = Path(cmd[cmd.index("--save_data_path") + 1])
+        d = sp / "xhs" / "jsonl"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "search_notelist_2026.jsonl").write_text(
+            '{"note_id":"partial","user_id":"u","source_keyword":"AP课程"}',
+            encoding="utf-8",
+        )
+        return 1, "CAPTCHA appeared, request failed, Verifytype: 301"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+    result = a.search("AP课程", 1, 3, "2026")
+
+    assert not result.ok
+    assert result.notes == []
+    assert "验证码/风控" in result.error
 
 
 def test_search_replacement_character_output_still_parses(tmp_path, monkeypatch):
@@ -348,6 +398,63 @@ def test_card_note_url_builds_explore_url():
     assert "explore/n1" in url and "xsec_token=tok" in url and "xsec_source=pc_feed" in url
 
 
+def test_repeated_list_calls_in_same_run_use_isolated_output_dirs(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    paths = []
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        account_id = cmd[cmd.index("--creator_id") + 1]
+        save_path = Path(cmd[cmd.index("--save_data_path") + 1])
+        paths.append(save_path)
+        jsonl = save_path / "xhs" / "jsonl"
+        jsonl.mkdir(parents=True, exist_ok=True)
+        (jsonl / "creator_notelist_2026.jsonl").write_text(
+            '{"note_id":"note-' + account_id + '","xsec_token":"token"}',
+            encoding="utf-8",
+        )
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+
+    first, _ = a.list_creator_notes(["a1"], "2026-07-17T00:00:00Z")
+    second, _ = a.list_creator_notes(["a2"], "2026-07-17T00:00:00Z")
+
+    assert paths[0] != paths[1]
+    assert [card["note_id"] for card in first] == ["note-a1"]
+    assert [card["note_id"] for card in second] == ["note-a2"]
+
+
+def test_repeated_detail_calls_in_same_run_do_not_read_previous_batch(tmp_path, monkeypatch):
+    a = _adapter(tmp_path, download_images=False)
+    paths = []
+
+    def fake_run(cmd, timeout=None, on_line=None):
+        url = cmd[cmd.index("--specified_id") + 1]
+        note_id = url.split("/explore/", 1)[1].split("?", 1)[0]
+        save_path = Path(cmd[cmd.index("--save_data_path") + 1])
+        paths.append(save_path)
+        jsonl = save_path / "xhs" / "jsonl"
+        jsonl.mkdir(parents=True, exist_ok=True)
+        (jsonl / "detail_contents_2026.jsonl").write_text(
+            '{"note_id":"' + note_id + '","user_id":"creator"}',
+            encoding="utf-8",
+        )
+        return 0, "ok"
+
+    monkeypatch.setattr(a, "_run_crawler", fake_run)
+
+    first = a.fetch_note_details(
+        [{"note_id": "n1", "xsec_token": "t1"}], "2026-07-17T00:00:00Z", False
+    )
+    second = a.fetch_note_details(
+        [{"note_id": "n2", "xsec_token": "t2"}], "2026-07-17T00:00:00Z", False
+    )
+
+    assert paths[0] != paths[1]
+    assert [note.note_id for note in first.notes] == ["n1"]
+    assert [note.note_id for note in second.notes] == ["n2"]
+
+
 def test_promote_images_copies_raw_to_media(tmp_path):
     """MC 下到 raw 的图复制到持久 media 库，image_paths 存 media 绝对路径；没图保持 []。"""
     from src.models import Note
@@ -420,6 +527,17 @@ def test_fetch_creator_notes_single_session_reads_combined_jsonl(tmp_path, monke
     assert commands[0][commands[0].index("--creator_id") + 1] == (
         "601d0481000000000101cc46,602d0481000000000101cc47"
     )
+
+
+def test_creator_command_can_disable_comments(tmp_path):
+    cmd = _adapter(tmp_path)._build_creator_command(
+        ["601d0481000000000101cc46"],
+        10,
+        tmp_path / "raw",
+        with_comments=False,
+    )
+    assert cmd[cmd.index("--get_comment") + 1] == "no"
+    assert cmd[cmd.index("--get_sub_comment") + 1] == "no"
 
 
 def test_fetch_creator_notes_missing_account_marked_failed(tmp_path, monkeypatch, caplog):

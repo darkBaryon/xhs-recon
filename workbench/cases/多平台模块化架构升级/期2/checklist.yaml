@@ -1,0 +1,24 @@
+# 多平台模块化架构升级 期2：独立关键词搜索
+必过命令:
+  - { name: lint, run: "uv run ruff check src tests web" }
+  - { name: 全量测试, run: "uv run pytest -q" }
+  - { name: search fixture E2E, run: "uv run pytest -q tests/recon/test_search_e2e.py" }
+  - { name: 搜索独立性, run: "uv run pytest -q tests/recon/test_search_use_case.py tests/recon/test_platform_capabilities.py" }
+  - { name: MySQL 关键词事务, run: "uv run pytest -q tests/recon/test_mysql_account_repository.py" }
+  - { name: 用户运行配置保持, run: "test \"$(shasum -a 256 'configs/留学辅导/run.yaml' | awk '{print $1}')\" = '3d6d883b523fd27e5acc5a95d39e5bb981d87453ef7ffe82c349ba325ae4859f'" }
+  - { name: 工作台视图, run: "python3 workbench/tools/build_views.py --check" }
+
+必存产物:
+  - src/recon/application/search/use_case.py
+  - src/recon/platforms/xhs/search.py
+  - src/recon/infrastructure/output/search_files.py
+  - tests/recon/test_search_e2e.py
+
+必含符号:
+  - { grep: "class SearchCollector", in: "src/recon/application/ports" }
+  - { grep: "class SearchContents", in: "src/recon/application/search" }
+  - { grep: "content_keywords", in: "src/recon/infrastructure/persistence/mysql" }
+
+禁留标记:
+  - { grep: "collection_runs", in: "src/recon" }
+  - { grep: "run_id", in: "src/recon/domain" }

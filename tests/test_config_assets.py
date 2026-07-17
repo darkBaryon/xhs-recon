@@ -1,13 +1,17 @@
 """keywords_file / watchlist_file 资产引用的加载语义（双源冲突报错、缺文件/缺键报错、正常注入）。"""
 
-import csv
 from pathlib import Path
 
 import pytest
 import yaml
 
-from src.pipelines.run_research import run_research
-from src.pipelines.runtime import resolve_config_refs as _resolve_config_refs
+from src.recon.entrypoints.config import (
+    load_search_config,
+    load_watchlist_config,
+)
+from src.recon.entrypoints.config import (
+    resolve_config_refs as _resolve_config_refs,
+)
 
 
 def _write_yaml(path: Path, data: dict) -> str:
@@ -84,10 +88,10 @@ def test_no_refs_config_passes_through_unchanged():
     assert _resolve_config_refs(dict(config)) == config
 
 
-# --- 全管线集成：资产引用跑通 fixture 管线 ---
+# --- 新入口集成：资产引用进入独立配置 DTO ---
 
 
-def test_pipeline_with_asset_files(tmp_path):
+def test_entrypoint_configs_load_asset_files(tmp_path):
     kf = _write_yaml(
         tmp_path / "kw.yaml",
         {"keywords": ["留学辅导"], "synonyms": {"留学辅导": ["essay辅导"]}},
@@ -109,15 +113,16 @@ def test_pipeline_with_asset_files(tmp_path):
         },
     )
 
-    paths = run_research(cfg_path)
+    search = load_search_config(cfg_path)
+    watchlist = load_watchlist_config(cfg_path)
 
-    rows = list(csv.DictReader(open(paths["watchlist"], encoding="utf-8")))
-    assert [r["account_id"] for r in rows] == ["601d0481000000000101cc46"]  # 资产文件 manual 生效
-    assert rows[0]["source"] == "manual"
-    assert Path(paths["creator_notes"]).exists()
+    assert search.keywords == ("留学辅导",)
+    assert search.synonyms == {"留学辅导": ("essay辅导",)}
+    assert [target.id.external_id for target in watchlist.targets] == ["601d0481000000000101cc46"]
+    assert watchlist.targets[0].source == "manual"
 
 
-def test_watchlist_file_manual_object_exports_nickname(tmp_path):
+def test_watchlist_file_manual_object_loads_nickname(tmp_path):
     kf = _write_yaml(tmp_path / "kw.yaml", {"keywords": ["留学辅导"]})
     wf = _write_yaml(
         tmp_path / "wl.yaml",
@@ -146,11 +151,8 @@ def test_watchlist_file_manual_object_exports_nickname(tmp_path):
         },
     )
 
-    paths = run_research(cfg_path)
+    target = load_watchlist_config(cfg_path).targets[0]
 
-    rows = list(csv.DictReader(open(paths["watchlist"], encoding="utf-8")))
-    assert rows[0] == {
-        "account_id": "601d0481000000000101cc46",
-        "nickname": "手写昵称",
-        "source": "manual",
-    }
+    assert target.id.external_id == "601d0481000000000101cc46"
+    assert target.nickname == "手写昵称"
+    assert target.source == "manual"

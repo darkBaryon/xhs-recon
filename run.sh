@@ -2,6 +2,7 @@
 # xhs-recon 启动脚本
 #   ./run.sh            # 离线 fixture demo（无需登录/浏览器，用 configs/sample.yaml）
 #   ./run.sh search     # 真实·广角：关键词搜索+榜单（关键词分批，进新领域时）
+#   ./run.sh account    # 真实·竞品账号分析（账号从配置读，默认不采评论）
 #   ./run.sh track      # 真实·长焦：watchlist→creator（含评论+原图，账号轮转，日常盯人）
 #   ./run.sh track-all  # 真实·巡逻：自动一批批 track，批间随机休眠 5-10 分钟，抓完收工
 #   ./run.sh real       # 真实·全流程（= research）
@@ -81,22 +82,31 @@ cmd="${1:-demo}"
 
 case "$cmd" in
   demo)
-    exec uv run python -m src.pipelines.run_research --config configs/sample.yaml "$@"
+    exec uv run python -m src.recon.entrypoints.cli research --config configs/sample.yaml "$@"
     ;;
-  search|track)
+  search|track|watchlist)
     ensure_browser
     acquire_run_lock
-    uv run python -m src.pipelines.cli "$cmd" --config "$CONFIG" "$@"
+    if [ "$cmd" = "search" ]; then
+      uv run python -m src.recon.entrypoints.cli search --config "$CONFIG" "$@"
+    else
+      uv run python -m src.recon.entrypoints.cli watchlist --config "$CONFIG" "$@"
+    fi
+    ;;
+  account)
+    ensure_browser
+    acquire_run_lock
+    uv run python -m src.recon.entrypoints.cli account --config "$CONFIG" "$@"
     ;;
   track-all)
     ensure_browser
     acquire_run_lock
-    uv run python -m src.pipelines.cli track --config "$CONFIG" --loop "$@"
+    uv run python -m src.recon.entrypoints.cli watchlist --config "$CONFIG" --loop "$@"
     ;;
-  real)
+  real|research)
     ensure_browser
     acquire_run_lock
-    uv run python -m src.pipelines.cli research --config "$CONFIG" "$@"
+    uv run python -m src.recon.entrypoints.cli research --config "$CONFIG" "$@"
     ;;
   browser)
     ensure_browser
@@ -105,21 +115,21 @@ case "$cmd" in
     # 补抓缺本地图的老帖（详情+图，评论不重抓）；可 --limit N 先小批试
     ensure_browser
     acquire_run_lock
-    uv run python -m src.pipelines.cli backfill-media --config "$CONFIG" "$@"
+    uv run python -m src.recon.entrypoints.cli backfill-media --config "$CONFIG" "$@"
     ;;
   web)
-    # 把最新一跑的导出渲染成本地静态站并打开（离线，无需采集浏览器/锁）
-    line="$(uv run python -m src.pipelines.cli web --config "$CONFIG" "$@")"
+    # 从新 schema 渲染本地静态站并打开（离线，无需采集浏览器/锁）
+    line="$(uv run python -m src.recon.entrypoints.cli web --config "$CONFIG" "$@")"
     echo "$line"
     path="${line#web: }"
     [ -n "$path" ] && [ -f "$path" ] && command -v open >/dev/null 2>&1 && open "$path"
     ;;
   bundle)
-    # 把最新一跑打包成研究快照 zip（供下游程序/LLM，离线，无需采集）
-    exec uv run python -m src.pipelines.cli bundle --config "$CONFIG" "$@"
+    # 返回新 research 最近生成的研究快照 zip（供下游程序/LLM，离线，无需采集）
+    exec uv run python -m src.recon.entrypoints.cli bundle --config "$CONFIG" "$@"
     ;;
   *)
-    echo "用法: ./run.sh [demo|search|track|track-all|real|browser|backfill|web|bundle]" >&2
+    echo "用法: ./run.sh [demo|account|search|track|watchlist|track-all|real|research|browser|backfill|web|bundle]" >&2
     exit 2
     ;;
 esac

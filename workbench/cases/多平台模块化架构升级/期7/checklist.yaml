@@ -1,0 +1,19 @@
+# 多平台模块化架构升级 期7：轻量搜索与风险熔断
+必过命令:
+  - { name: 全量测试, run: "uv run pytest -q" }
+  - { name: 搜索安全测试, run: "uv run pytest -q tests/test_mediacrawler_adapter.py tests/recon/test_search_use_case.py" }
+  - { name: MediaCrawler 语法, run: "uv run python -m py_compile ../MediaCrawler/media_platform/xhs/core.py ../MediaCrawler/media_platform/xhs/client.py ../MediaCrawler/store/xhs/__init__.py" }
+  - { name: 用户运行配置保持, run: "test \"$(shasum -a 256 'configs/留学辅导/run.yaml' | awk '{print $1}')\" = '3d6d883b523fd27e5acc5a95d39e5bb981d87453ef7ffe82c349ba325ae4859f'" }
+  - { name: 工作台视图, run: "python3 workbench/tools/build_views.py --check" }
+
+必存产物:
+  - src/adapters/mediacrawler_adapter.py
+  - src/recon/application/search/use_case.py
+  - ../MediaCrawler/media_platform/xhs/core.py
+  - ../MediaCrawler/store/xhs/__init__.py
+
+必含符号:
+  - { grep: '"--list_only"', in: "src/adapters/mediacrawler_adapter.py" }
+  - { grep: "if config.LIST_ONLY", in: "../MediaCrawler/media_platform/xhs/core.py" }
+  - { grep: "source_keyword", in: "../MediaCrawler/store/xhs/__init__.py" }
+  - { grep: "停止后续关键词批次", in: "src/recon/application/search/use_case.py" }
