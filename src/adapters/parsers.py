@@ -7,6 +7,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from src.models import Account, Comment, CreatorProfile, Note
 
@@ -72,28 +73,51 @@ def card_time_to_iso(raw_ms, text: str, collected_at: str) -> str:
         collected = datetime.fromisoformat(collected_at.replace("Z", "+00:00"))
     except ValueError:
         return ""
-    if label == "昨天":
-        return (collected - timedelta(days=1)).isoformat()
-    if label == "前天":
-        return (collected - timedelta(days=2)).isoformat()
+    local_collected = collected.astimezone(ZoneInfo("Asia/Shanghai"))
+
+    def relative_day(prefix: str, days: int) -> str:
+        suffix = label.removeprefix(prefix).strip()
+        clock = re.fullmatch(r"(\d{1,2}):(\d{2})", suffix)
+        hour = int(clock.group(1)) if clock else local_collected.hour
+        minute = int(clock.group(2)) if clock else local_collected.minute
+        local_time = local_collected.replace(
+            hour=hour,
+            minute=minute,
+            second=0,
+            microsecond=0,
+        ) - timedelta(days=days)
+        return local_time.isoformat()
+
+    if label.startswith("昨天"):
+        return relative_day("昨天", 1)
+    if label.startswith("前天"):
+        return relative_day("前天", 2)
+    if label == "刚刚":
+        return collected.isoformat()
+    minutes_ago = re.fullmatch(r"(\d+)分钟前", label)
+    if minutes_ago:
+        return (collected - timedelta(minutes=int(minutes_ago.group(1)))).isoformat()
+    hours_ago = re.fullmatch(r"(\d+)小时前", label)
+    if hours_ago:
+        return (collected - timedelta(hours=int(hours_ago.group(1)))).isoformat()
     days_ago = re.fullmatch(r"(\d+)天前", label)
     if days_ago:
-        return (collected - timedelta(days=int(days_ago.group(1)))).isoformat()
+        return (local_collected - timedelta(days=int(days_ago.group(1)))).isoformat()
     for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
         try:
             parsed = datetime.strptime(label, fmt)
-            return parsed.replace(tzinfo=collected.tzinfo).isoformat()
+            return parsed.replace(tzinfo=local_collected.tzinfo).isoformat()
         except ValueError:
             pass
     for fmt in ("%m-%d", "%m/%d"):
         try:
             parsed = datetime.strptime(label, fmt).replace(
-                year=collected.year, tzinfo=collected.tzinfo
+                year=local_collected.year, tzinfo=local_collected.tzinfo
             )
         except ValueError:
             continue
-        if parsed > collected:
-            parsed = parsed.replace(year=collected.year - 1)
+        if parsed > local_collected:
+            parsed = parsed.replace(year=local_collected.year - 1)
         return parsed.isoformat()
     return ""
 

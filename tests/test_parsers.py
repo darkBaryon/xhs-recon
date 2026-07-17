@@ -1,4 +1,5 @@
 from src.adapters.parsers import (
+    card_time_to_iso,
     epoch_ms_to_iso,
     normalize_count,
     normalize_creator_ref,
@@ -88,6 +89,14 @@ def test_parse_note_field_mapping():
 
 def test_epoch_conversion_bad_input():
     assert epoch_ms_to_iso("nope") == ""
+
+
+def test_card_time_parses_relative_labels_with_clock_suffix():
+    collected_at = "2026-07-17T16:07:07+00:00"
+
+    assert card_time_to_iso(0, "昨天 18:15", collected_at) == "2026-07-17T18:15:00+08:00"
+    assert card_time_to_iso(0, "31分钟前", collected_at).startswith("2026-07-17T15:36")
+    assert card_time_to_iso(0, "2小时前", collected_at).startswith("2026-07-17T14:07")
 
 
 def test_parse_comment_keeps_full_fields():
